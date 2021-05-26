@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+service Logger {
+  rpc AppendMessage (AppendMessageRequest) returns (AppendMessageResponse) {}
+  rpc ListMessages (ListMessagesRequest) returns (ListMessagesResponse) {}
+}
+
+message LogMessage {
+  string log = 1;
+}
+
+message AppendMessageRequest {
+  LogMessage log = 1;
+}
+
+message AppendMessageResponse {
+  AppendResponseCode responseCode = 1;
+}
+
+enum AppendResponseCode {
+  OK = 0;
+  ERROR = 1;
+}
+
+message ListMessagesRequest {
+}
+
+message ListMessagesResponse {
+  repeated LogMessage logs = 1;
+}
