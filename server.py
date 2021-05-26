@@ -34,8 +34,9 @@ class RaftGRPC(pb2_grpc.LoggerServicer):
         item = request.log
         request = pb2.AppendMessageRequest(log=item)
         self.items.append(item)
-        for stub in self.stub_list:
-            response = stub.AppendMessage(request)
+        if self.id == 1:
+            for stub in self.stub_list:
+                response = stub.AppendMessage(request)
         return pb2.AppendMessageResponse()
 
     def get_log(self):
