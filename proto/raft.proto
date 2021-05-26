@@ -1,30 +1,45 @@
 syntax = "proto3";
 
-service Logger {
-  rpc AppendMessage (AppendMessageRequest) returns (AppendMessageResponse) {}
+service Raft {
+  rpc Vote (RequestVoteRPC) returns (ResponseVoteRPC) {}
+  rpc AppendMessage (RequestAppendEntriesRPC) returns (ResponseAppendEntriesRPC) {}
   rpc ListMessages (ListMessagesRequest) returns (ListMessagesResponse) {}
 }
 
-message LogMessage {
-  string log = 1;
+message RequestVoteRPC {
+  int32 term = 1;
+  int32 candidateId = 2;
+  int32 lastLogIndex = 3;
+  int32 lastLogTerm = 4;
 }
 
-message AppendMessageRequest {
-  LogMessage log = 1;
+message ResponseVoteRPC {
+  int32 term = 1;
+  bool voteGranted = 2;
 }
 
-message AppendMessageResponse {
-  AppendResponseCode responseCode = 1;
+message RequestAppendEntriesRPC {
+  int32 term = 1;
+  int32 leaderId = 2;
+  int32 prevLogIndex = 3;
+  int32 prevLogTerm = 4;
+  repeated LogEntry entries = 5;
+  int32 leaderCommit = 6;
 }
 
-enum AppendResponseCode {
-  OK = 0;
-  ERROR = 1;
+message ResponseAppendEntriesRPC {
+  int32 term = 1;
+  bool success = 2;
+}
+
+message LogEntry {
+  int32 term = 1;
+  string command = 2;
 }
 
 message ListMessagesRequest {
 }
 
 message ListMessagesResponse {
-  repeated LogMessage logs = 1;
+  repeated LogEntry logs = 1;
 }

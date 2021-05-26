@@ -6,7 +6,7 @@ import proto.raft_pb2 as pb2
 import sys
 
 
-class RaftGRPC(pb2_grpc.LoggerServicer):
+class RaftGRPC(pb2_grpc.RaftServicer):
 
     def __init__(self, my_dict_address):
         self.items = []
@@ -23,7 +23,7 @@ class RaftGRPC(pb2_grpc.LoggerServicer):
         for self.address in self.my_dict_address.values():
             print('{}:{}'.format("localhost", self.address.split(":")[1]))
             channel = grpc.insecure_channel(self.address)
-            stub = pb2_grpc.LoggerStub(channel)
+            stub = pb2_grpc.RaftStub(channel)
             self.stub_list.append(stub)
 
     def ListMessages(self, request, context):
@@ -32,12 +32,12 @@ class RaftGRPC(pb2_grpc.LoggerServicer):
 
     def AppendMessage(self, request, context):
         item = request.log
-        request = pb2.AppendMessageRequest(log=item)
+        request = pb2.RequestAppendEntriesRPC(log=item)
         self.items.append(item)
         if self.id == 1:
             for stub in self.stub_list:
                 response = stub.AppendMessage(request)
-        return pb2.AppendMessageResponse()
+        return pb2.ResponseAppendEntriesRPC()
 
     def get_log(self):
         return self.items

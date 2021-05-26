@@ -5,7 +5,7 @@ import grpc
 from proto import raft_pb2 as proto_dot_raft__pb2
 
 
-class LoggerStub(object):
+class RaftStub(object):
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -14,20 +14,31 @@ class LoggerStub(object):
         Args:
             channel: A grpc.Channel.
         """
+        self.Vote = channel.unary_unary(
+                '/Raft/Vote',
+                request_serializer=proto_dot_raft__pb2.RequestVoteRPC.SerializeToString,
+                response_deserializer=proto_dot_raft__pb2.ResponseVoteRPC.FromString,
+                )
         self.AppendMessage = channel.unary_unary(
-                '/Logger/AppendMessage',
-                request_serializer=proto_dot_raft__pb2.AppendMessageRequest.SerializeToString,
-                response_deserializer=proto_dot_raft__pb2.AppendMessageResponse.FromString,
+                '/Raft/AppendMessage',
+                request_serializer=proto_dot_raft__pb2.RequestAppendEntriesRPC.SerializeToString,
+                response_deserializer=proto_dot_raft__pb2.ResponseAppendEntriesRPC.FromString,
                 )
         self.ListMessages = channel.unary_unary(
-                '/Logger/ListMessages',
+                '/Raft/ListMessages',
                 request_serializer=proto_dot_raft__pb2.ListMessagesRequest.SerializeToString,
                 response_deserializer=proto_dot_raft__pb2.ListMessagesResponse.FromString,
                 )
 
 
-class LoggerServicer(object):
+class RaftServicer(object):
     """Missing associated documentation comment in .proto file."""
+
+    def Vote(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
 
     def AppendMessage(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -42,12 +53,17 @@ class LoggerServicer(object):
         raise NotImplementedError('Method not implemented!')
 
 
-def add_LoggerServicer_to_server(servicer, server):
+def add_RaftServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'Vote': grpc.unary_unary_rpc_method_handler(
+                    servicer.Vote,
+                    request_deserializer=proto_dot_raft__pb2.RequestVoteRPC.FromString,
+                    response_serializer=proto_dot_raft__pb2.ResponseVoteRPC.SerializeToString,
+            ),
             'AppendMessage': grpc.unary_unary_rpc_method_handler(
                     servicer.AppendMessage,
-                    request_deserializer=proto_dot_raft__pb2.AppendMessageRequest.FromString,
-                    response_serializer=proto_dot_raft__pb2.AppendMessageResponse.SerializeToString,
+                    request_deserializer=proto_dot_raft__pb2.RequestAppendEntriesRPC.FromString,
+                    response_serializer=proto_dot_raft__pb2.ResponseAppendEntriesRPC.SerializeToString,
             ),
             'ListMessages': grpc.unary_unary_rpc_method_handler(
                     servicer.ListMessages,
@@ -56,13 +72,30 @@ def add_LoggerServicer_to_server(servicer, server):
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'Logger', rpc_method_handlers)
+            'Raft', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
 
 
  # This class is part of an EXPERIMENTAL API.
-class Logger(object):
+class Raft(object):
     """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def Vote(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/Raft/Vote',
+            proto_dot_raft__pb2.RequestVoteRPC.SerializeToString,
+            proto_dot_raft__pb2.ResponseVoteRPC.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
     @staticmethod
     def AppendMessage(request,
@@ -75,9 +108,9 @@ class Logger(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/Logger/AppendMessage',
-            proto_dot_raft__pb2.AppendMessageRequest.SerializeToString,
-            proto_dot_raft__pb2.AppendMessageResponse.FromString,
+        return grpc.experimental.unary_unary(request, target, '/Raft/AppendMessage',
+            proto_dot_raft__pb2.RequestAppendEntriesRPC.SerializeToString,
+            proto_dot_raft__pb2.ResponseAppendEntriesRPC.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -92,7 +125,7 @@ class Logger(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/Logger/ListMessages',
+        return grpc.experimental.unary_unary(request, target, '/Raft/ListMessages',
             proto_dot_raft__pb2.ListMessagesRequest.SerializeToString,
             proto_dot_raft__pb2.ListMessagesResponse.FromString,
             options, channel_credentials,
