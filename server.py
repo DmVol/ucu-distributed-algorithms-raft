@@ -9,12 +9,16 @@ import sys
 class RaftGRPC(pb2_grpc.RaftServicer):
 
     def __init__(self, my_dict_address):
-        self.items = []
+        self.items = {}
         self.stub_list = []
         self.port_addr = []
         self.id = int(sys.argv[2])
         self.my_dict_address = my_dict_address
         self.my_dict_address.pop(str(self.id))
+        self.term = 1
+        self.leaderid = 1
+        self.last_log_index = 0
+        self.commit_index = 0
 
         for i in self.my_dict_address:
             tmp = i, self.my_dict_address[i]
@@ -27,17 +31,33 @@ class RaftGRPC(pb2_grpc.RaftServicer):
             self.stub_list.append(stub)
 
     def ListMessages(self, request, context):
-        response = pb2.ListMessagesResponse(logs=self.items)
+        print(self.items)
+        response = pb2.ListMessagesResponse(logs=list(self.items.values()))
         return response
 
     def AppendMessage(self, request, context):
-        item = request.log
-        request = pb2.RequestAppendEntriesRPC(log=item)
-        self.items.append(item)
+        if self.term < request.term:
+            print("Term is lower tan in request")
+            return pb2.ResponseAppendEntriesRPC(term=self.term, success=False)
+
+        com = request.entry.command
+        entry = pb2.LogEntry(term=self.term, command=com)
+        self.items[self.last_log_index] = entry
+        self.last_log_index += 1
+        request = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id, prevLogIndex=self.last_log_index,
+                                              prevLogTerm=0, entry=entry, leaderCommit=self.commit_index)
         if self.id == 1:
             for stub in self.stub_list:
                 response = stub.AppendMessage(request)
-        return pb2.ResponseAppendEntriesRPC()
+
+        self.commit_index += 1
+
+        return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
+
+    def broadcast(self, request, context):
+        if self.id == 1:
+            for stub in self.stub_list:
+                response = stub.AppendMessage(request)
 
     def get_log(self):
         return self.items
@@ -55,7 +75,7 @@ if __name__ == '__main__':
 
     raftserver = RaftGRPC(my_dict_address)
     server = grpc.server(futures.ThreadPoolExecutor())
-    pb2_grpc.add_LoggerServicer_to_server(raftserver, server)
+    pb2_grpc.add_RaftServicer_to_server(raftserver, server)
     server.add_insecure_port('[::]:' + sys.argv[1])
     server.start()
     try:
