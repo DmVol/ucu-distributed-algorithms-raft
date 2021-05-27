@@ -19,7 +19,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   syntax='proto3',
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_pb=b'\n\x10proto/raft.proto\"^\n\x0eRequestVoteRPC\x12\x0c\n\x04term\x18\x01 \x01(\x05\x12\x13\n\x0b\x63\x61ndidateId\x18\x02 \x01(\x05\x12\x14\n\x0clastLogIndex\x18\x03 \x01(\x05\x12\x13\n\x0blastLogTerm\x18\x04 \x01(\x05\"4\n\x0fResponseVoteRPC\x12\x0c\n\x04term\x18\x01 \x01(\x05\x12\x13\n\x0bvoteGranted\x18\x02 \x01(\x08\"\x96\x01\n\x17RequestAppendEntriesRPC\x12\x0c\n\x04term\x18\x01 \x01(\x05\x12\x10\n\x08leaderId\x18\x02 \x01(\x05\x12\x14\n\x0cprevLogIndex\x18\x03 \x01(\x05\x12\x13\n\x0bprevLogTerm\x18\x04 \x01(\x05\x12\x1a\n\x07\x65ntries\x18\x05 \x03(\x0b\x32\t.LogEntry\x12\x14\n\x0cleaderCommit\x18\x06 \x01(\x05\"9\n\x18ResponseAppendEntriesRPC\x12\x0c\n\x04term\x18\x01 \x01(\x05\x12\x0f\n\x07success\x18\x02 \x01(\x08\")\n\x08LogEntry\x12\x0c\n\x04term\x18\x01 \x01(\x05\x12\x0f\n\x07\x63ommand\x18\x02 \x01(\t\"\x15\n\x13ListMessagesRequest\"/\n\x14ListMessagesResponse\x12\x17\n\x04logs\x18\x01 \x03(\x0b\x32\t.LogEntry2\xba\x01\n\x04Raft\x12+\n\x04Vote\x12\x0f.RequestVoteRPC\x1a\x10.ResponseVoteRPC\"\x00\x12\x46\n\rAppendMessage\x12\x18.RequestAppendEntriesRPC\x1a\x19.ResponseAppendEntriesRPC\"\x00\x12=\n\x0cListMessages\x12\x14.ListMessagesRequest\x1a\x15.ListMessagesResponse\"\x00\x62\x06proto3'
+  serialized_pb=b'\n\x10proto/raft.proto\"^\n\x0eRequestVoteRPC\x12\x0c\n\x04term\x18\x01 \x01(\x05\x12\x13\n\x0b\x63\x61ndidateId\x18\x02 \x01(\x05\x12\x14\n\x0clastLogIndex\x18\x03 \x01(\x05\x12\x13\n\x0blastLogTerm\x18\x04 \x01(\x05\"4\n\x0fResponseVoteRPC\x12\x0c\n\x04term\x18\x01 \x01(\x05\x12\x13\n\x0bvoteGranted\x18\x02 \x01(\x08\"\x94\x01\n\x17RequestAppendEntriesRPC\x12\x0c\n\x04term\x18\x01 \x01(\x05\x12\x10\n\x08leaderId\x18\x02 \x01(\x05\x12\x14\n\x0cprevLogIndex\x18\x03 \x01(\x05\x12\x13\n\x0bprevLogTerm\x18\x04 \x01(\x05\x12\x18\n\x05\x65ntry\x18\x05 \x01(\x0b\x32\t.LogEntry\x12\x14\n\x0cleaderCommit\x18\x06 \x01(\x05\"9\n\x18ResponseAppendEntriesRPC\x12\x0c\n\x04term\x18\x01 \x01(\x05\x12\x0f\n\x07success\x18\x02 \x01(\x08\")\n\x08LogEntry\x12\x0c\n\x04term\x18\x01 \x01(\x05\x12\x0f\n\x07\x63ommand\x18\x02 \x01(\t\"\x15\n\x13ListMessagesRequest\"/\n\x14ListMessagesResponse\x12\x17\n\x04logs\x18\x01 \x03(\x0b\x32\t.LogEntry2\xba\x01\n\x04Raft\x12+\n\x04Vote\x12\x0f.RequestVoteRPC\x1a\x10.ResponseVoteRPC\"\x00\x12\x46\n\rAppendMessage\x12\x18.RequestAppendEntriesRPC\x1a\x19.ResponseAppendEntriesRPC\"\x00\x12=\n\x0cListMessages\x12\x14.ListMessagesRequest\x1a\x15.ListMessagesResponse\"\x00\x62\x06proto3'
 )
 
 
@@ -154,9 +154,9 @@ _REQUESTAPPENDENTRIESRPC = _descriptor.Descriptor(
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
     _descriptor.FieldDescriptor(
-      name='entries', full_name='RequestAppendEntriesRPC.entries', index=4,
-      number=5, type=11, cpp_type=10, label=3,
-      has_default_value=False, default_value=[],
+      name='entry', full_name='RequestAppendEntriesRPC.entry', index=4,
+      number=5, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR,  create_key=_descriptor._internal_create_key),
@@ -180,7 +180,7 @@ _REQUESTAPPENDENTRIESRPC = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=171,
-  serialized_end=321,
+  serialized_end=319,
 )
 
 
@@ -218,8 +218,8 @@ _RESPONSEAPPENDENTRIESRPC = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=323,
-  serialized_end=380,
+  serialized_start=321,
+  serialized_end=378,
 )
 
 
@@ -257,8 +257,8 @@ _LOGENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=382,
-  serialized_end=423,
+  serialized_start=380,
+  serialized_end=421,
 )
 
 
@@ -282,8 +282,8 @@ _LISTMESSAGESREQUEST = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=425,
-  serialized_end=446,
+  serialized_start=423,
+  serialized_end=444,
 )
 
 
@@ -314,11 +314,11 @@ _LISTMESSAGESRESPONSE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=448,
-  serialized_end=495,
+  serialized_start=446,
+  serialized_end=493,
 )
 
-_REQUESTAPPENDENTRIESRPC.fields_by_name['entries'].message_type = _LOGENTRY
+_REQUESTAPPENDENTRIESRPC.fields_by_name['entry'].message_type = _LOGENTRY
 _LISTMESSAGESRESPONSE.fields_by_name['logs'].message_type = _LOGENTRY
 DESCRIPTOR.message_types_by_name['RequestVoteRPC'] = _REQUESTVOTERPC
 DESCRIPTOR.message_types_by_name['ResponseVoteRPC'] = _RESPONSEVOTERPC
@@ -387,8 +387,8 @@ _RAFT = _descriptor.ServiceDescriptor(
   index=0,
   serialized_options=None,
   create_key=_descriptor._internal_create_key,
-  serialized_start=498,
-  serialized_end=684,
+  serialized_start=496,
+  serialized_end=682,
   methods=[
   _descriptor.MethodDescriptor(
     name='Vote',
