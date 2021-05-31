@@ -8,17 +8,22 @@ import sys
 
 class RaftGRPC(pb2_grpc.RaftServicer):
 
+    # Initialization
     def __init__(self, my_dict_address):
-        self.items = {}
+        self.term = 0
+        self.voted_for = None
+        self.log = {}
+        self.commit_index = 0
+        self.current_role = 'follower'
+        self.current_leader = 1 # None
+        self.votes_received = []
         self.stub_list = []
         self.port_addr = []
         self.id = int(sys.argv[2])
         self.my_dict_address = my_dict_address
         self.my_dict_address.pop(str(self.id))
-        self.term = 1
-        self.leaderid = 1
         self.last_log_index = 0
-        self.commit_index = 0
+        self.last_log_term = 0
 
         for i in self.my_dict_address:
             tmp = i, self.my_dict_address[i]
@@ -30,9 +35,41 @@ class RaftGRPC(pb2_grpc.RaftServicer):
             stub = pb2_grpc.RaftStub(channel)
             self.stub_list.append(stub)
 
+    def Vote(self, request, context):
+        print(f"Node {self.id} received vote request")
+
+        term_ok, log_ok = None, None
+
+        # Check log
+        if request.lastLogTerm > self.last_log_term:
+            log_ok = True
+        elif request.lastLogTerm == self.last_log_term and request.lastLogIndex >= self.last_log_index:
+            log_ok = True
+        else:
+            log_ok = False
+
+        # Check term
+        if request.term > self.term:
+            term_ok = True
+        elif request.term == self.term and self.voted_for in (None, request.candidateId):
+            term_ok = True
+        else:
+            term_ok = False
+
+        # Return response
+        if term_ok and log_ok:
+            print("Vote granted")
+            self.term = request.term
+            self.current_role = "follower"
+            self.voted_for = request.candidateId
+            return pb2.ResponseVoteRPC(term=self.term, voteGranted=True)
+        else:
+            print("Vote rejected")
+            return pb2.ResponseVoteRPC(term=self.term, voteGranted=False)
+
     def ListMessages(self, request, context):
-        print(self.items)
-        response = pb2.ListMessagesResponse(logs=list(self.items.values()))
+        print(self.log)
+        response = pb2.ListMessagesResponse(logs=list(self.log.values()))
         return response
 
     def AppendMessage(self, request, context):
@@ -42,7 +79,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
 
         com = request.entry.command
         entry = pb2.LogEntry(term=self.term, command=com)
-        self.items[self.last_log_index] = entry
+        self.log[self.last_log_index] = entry
         self.last_log_index += 1
         request = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id, prevLogIndex=self.last_log_index,
                                               prevLogTerm=0, entry=entry, leaderCommit=self.commit_index)
@@ -60,7 +97,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                 response = stub.AppendMessage(request)
 
     def get_log(self):
-        return self.items
+        return self.log
 
 if __name__ == '__main__':
 
