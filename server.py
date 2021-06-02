@@ -77,7 +77,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                 else:
                     entry = None
                 # Append Entries Request.
-                print(f"my term is {self.last_log_term}")
+                print(f"my term is {self.term} last log term is {self.last_log_term}")
                 request = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id, prevLogIndex=prevLogIndex,
                                                       prevLogTerm=self.last_log_term, entry=entry, leaderCommit=self.commit_index)
                 responses = 0
@@ -145,6 +145,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
 
     def ListMessages(self, request, context):
         print(self.log)
+        print(self.commit_index)
         response = pb2.ListMessagesResponse(logs=list(self.log.values()))
         return response
 
@@ -170,14 +171,19 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                                               prevLogTerm=self.last_log_term, entry=entry, leaderCommit=self.commit_index)
             # Broadcast messsages
             i = 0
+            resp = 0
             for stub in self.stub_list:
                 try:
                     response = stub.AppendMessage(req)
                     print('Got append entries response: {}'.format(response))
+                    resp += 1
                 except:
                     print('cannot connect to ' + str(self.port_addr[i]))
                 i += 1
-            self.commit_index += 1
+
+            # wait for majority to commit
+            if resp >= (len(self.my_dict_address) + 1) // 2 + 1:
+                self.commit_index = self.last_log_index
 
         elif self.term == request.term and self.current_role == "candidate":
             self.current_role = "follower"
