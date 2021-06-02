@@ -59,6 +59,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                     except:
                         print("connection error")
                     responses += 1
+                print(self.votes_received)
                 self.timeout = time.time() + random.randint(5, 10)
             elif self.votes_received >= (len(self.my_dict_address) + 1) // 2 + 1:
                 print("becoming leader")
@@ -152,11 +153,13 @@ class RaftGRPC(pb2_grpc.RaftServicer):
         #     print("Term is lower than in request")
         #     return pb2.ResponseAppendEntriesRPC(term=self.term, success=False)
         if request.term > self.term:
+            print("term is reater than mine")
             self.term = request.term
             self.voted_for = -1
             self.current_role = "follower"
             self.current_leader = request.leaderId
-            return pb2.ResponseAppendEntriesRPC(term=self.term, success=False)
+            self.timeout = time.time() + random.randint(5, 10)
+            return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
 
         if self.current_role == "leader":
             entry = pb2.LogEntry(term=self.term, command=request.entry.command)
@@ -179,6 +182,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
         elif self.term == request.term and self.current_role == "candidate":
             self.current_role = "follower"
             self.current_leader = request.leaderId
+            self.timeout = time.time() + random.randint(5, 10)
             return pb2.ResponseAppendEntriesRPC(term=self.term, success=False)
 
         elif self.current_role == "follower":
