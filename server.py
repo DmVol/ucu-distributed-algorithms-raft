@@ -13,7 +13,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
     def __init__(self, my_dict_address):
         self.term = 0
         self.voted_for = None
-        self.log = []
+        self.log = {}
         self.commit_index = 0
         self.current_role = 'follower'
         self.current_leader = 1 # None
@@ -76,18 +76,18 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                 else:
                     entry = None
                 # Append Entries Request.
+                print(f"my term is {self.last_log_term}")
                 request = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id, prevLogIndex=prevLogIndex,
                                                       prevLogTerm=self.last_log_term, entry=entry, leaderCommit=self.commit_index)
                 responses = 0
                 for stub in self.stub_list:
-                    print(responses)
                     try:
                         response = stub.AppendMessage(request)
-                        print(response)
-                        print(f"prev idx {prevLogIndex}")
-                        print(f"self idx {self.last_log_index}")
                         while response.success == False:
-                            prevLogIndex -= 1
+                            if prevLogIndex >= 1:
+                                prevLogIndex -= 1
+                            print(f"sending entry with index -  index no {prevLogIndex}, current index is {self.last_log_index}")
+                            print(entry)
                             entry = self.log[prevLogIndex]
                             request = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id,
                                                                   prevLogIndex=prevLogIndex, prevLogTerm=entry.term,
@@ -95,11 +95,14 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                             response = stub.AppendMessage(request)
                         while prevLogIndex < self.last_log_index:
                             prevLogIndex += 1
+                            print(f"sending entry with index -  index no {prevLogIndex}, current index is {self.last_log_index}")
+                            print(entry)
                             entry = self.log[prevLogIndex]
                             request = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id,
                                                                   prevLogIndex=prevLogIndex, prevLogTerm=entry.term,
                                                                   entry=entry, leaderCommit=self.commit_index)
                             response = stub.AppendMessage(request)
+
                     except Exception as e:
                         print(e)
                         print('cannot connect to ' + str(self.port_addr[responses]))
@@ -109,7 +112,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
 
     def Vote(self, request, context):
         print(f"Node {self.id} received vote request")
-        term_ok, log_ok = None, None
+        term_ok, log_ok = False, False
 
         # Check log
         if request.lastLogTerm > self.last_log_term:
@@ -153,13 +156,15 @@ class RaftGRPC(pb2_grpc.RaftServicer):
             self.voted_for = -1
             self.current_role = "follower"
             self.current_leader = request.leaderId
+            return pb2.ResponseAppendEntriesRPC(term=self.term, success=False)
 
         if self.current_role == "leader":
             entry = pb2.LogEntry(term=self.term, command=request.entry.command)
-            self.log[self.last_log_index] = entry
+            self.last_log_term = self.term
             self.last_log_index += 1
+            self.log[self.last_log_index] = entry
             req = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id, prevLogIndex=self.last_log_index,
-                                               prevLogTerm=0, entry=entry, leaderCommit=self.commit_index)
+                                              prevLogTerm=self.last_log_term, entry=entry, leaderCommit=self.commit_index)
             # Broadcast messsages
             i = 0
             for stub in self.stub_list:
@@ -180,25 +185,30 @@ class RaftGRPC(pb2_grpc.RaftServicer):
             self.term = request.term
             self.current_leader = request.leaderId
             self.timeout = time.time() + random.randint(5, 10)
-            if request.prevLogIndex == self.last_log_index + 1 and request.prevLogTerm >= self.last_log_term:
-                print("here")
-                self.log[request.entry.index] = request.entry
+            # Remove unconsistent entries
+            # if request.entry.command != "" and self.last_log_index > request.lastLogIndex:
+            #     if self.log[request.lastLogIndex].term != request.term:
+            #         del self.log[request.lastLogIndex:]
+            print(f"follower index {self.last_log_index} and request index is {request.prevLogIndex}")
+            print(f"follower log term {self.last_log_term} and request term is {request.prevLogTerm}")
+            if (request.prevLogIndex == self.last_log_index + 1) and request.prevLogTerm >= self.last_log_term:
+                print(f"received data for log index {self.last_log_index}")
+                print(request)
+                self.log[request.prevLogIndex] = request.entry
                 self.last_log_index += 1
                 self.last_log_term = request.prevLogTerm
-                print(self.log)
-                print('Follower got the message')
+                print('Follower got the message with new log')
+                if request.leaderCommit > self.commit_index:
+                    print("committing on follower")
+                    self.commit_index = request.leaderCommit
                 return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
             elif request.prevLogIndex == self.last_log_index and request.prevLogTerm == self.last_log_term:
                 print('Follower got the message')
+                print(f"got empty request {self.last_log_index}")
                 return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
             else:
-                print("Follower abort request")
-                return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
-
-
-
-    def update_log(self, request, context):
-        pass
+                print(f"Follower log_index is {self.last_log_index}")
+                return pb2.ResponseAppendEntriesRPC(term=self.term, success=False)
 
 
     def broadcast(self, request, context):
