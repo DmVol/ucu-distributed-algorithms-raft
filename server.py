@@ -13,7 +13,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
     def __init__(self, my_dict_address):
         self.term = 0
         self.voted_for = None
-        self.log = {}
+        self.log = []
         self.commit_index = 0
         self.current_role = 'follower'
         self.current_leader = 1 # None
@@ -65,6 +65,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                 self.current_role = "leader"
                 self.votes_received = 1
                 self.voted_for = self.id
+                self.timeout = time.time()
         elif self.current_role == "leader":
             print("Node is leader")
             if time.time() > self.timeout:
@@ -82,6 +83,9 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                     print(responses)
                     try:
                         response = stub.AppendMessage(request)
+                        print(response)
+                        print(f"prev idx {prevLogIndex}")
+                        print(f"self idx {self.last_log_index}")
                         while response.success == False:
                             prevLogIndex -= 1
                             entry = self.log[prevLogIndex]
@@ -96,7 +100,8 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                                                                   prevLogIndex=prevLogIndex, prevLogTerm=entry.term,
                                                                   entry=entry, leaderCommit=self.commit_index)
                             response = stub.AppendMessage(request)
-                    except:
+                    except Exception as e:
+                        print(e)
                         print('cannot connect to ' + str(self.port_addr[responses]))
                     responses += 1
                 self.timeout = time.time() + 1
@@ -128,6 +133,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
             self.term = request.term
             self.current_role = "follower"
             self.voted_for = request.candidateId
+            self.timeout = time.time() + random.randint(5, 10)
             return pb2.ResponseVoteRPC(term=self.term, voteGranted=True)
         else:
             print("Vote rejected")
@@ -139,23 +145,61 @@ class RaftGRPC(pb2_grpc.RaftServicer):
         return response
 
     def AppendMessage(self, request, context):
-        if self.term < request.term:
-            print("Term is lower tan in request")
-            return pb2.ResponseAppendEntriesRPC(term=self.term, success=False)
-        self.timeout = time.time() + random.randint(5, 10)
-        com = request.entry.command
-        entry = pb2.LogEntry(term=self.term, command=com)
-        self.log[self.last_log_index] = entry
-        self.last_log_index += 1
-        request = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id, prevLogIndex=self.last_log_index,
-                                              prevLogTerm=0, entry=entry, leaderCommit=self.commit_index)
-        if self.id == 1:
+        # if self.term < request.term:
+        #     print("Term is lower than in request")
+        #     return pb2.ResponseAppendEntriesRPC(term=self.term, success=False)
+        if request.term > self.term:
+            self.term = request.term
+            self.voted_for = -1
+            self.current_role = "follower"
+            self.current_leader = request.leaderId
+
+        if self.current_role == "leader":
+            entry = pb2.LogEntry(term=self.term, command=request.entry.command)
+            self.log[self.last_log_index] = entry
+            self.last_log_index += 1
+            req = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id, prevLogIndex=self.last_log_index,
+                                               prevLogTerm=0, entry=entry, leaderCommit=self.commit_index)
+            # Broadcast messsages
+            i = 0
             for stub in self.stub_list:
-                response = stub.AppendMessage(request)
+                try:
+                    response = stub.AppendMessage(req)
+                    print('Got append entries response: {}'.format(response))
+                except:
+                    print('cannot connect to ' + str(self.port_addr[i]))
+                i += 1
+            self.commit_index += 1
 
-        self.commit_index += 1
+        elif self.term == request.term and self.current_role == "candidate":
+            self.current_role = "follower"
+            self.current_leader = request.leaderId
+            return pb2.ResponseAppendEntriesRPC(term=self.term, success=False)
 
-        return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
+        elif self.current_role == "follower":
+            self.term = request.term
+            self.current_leader = request.leaderId
+            self.timeout = time.time() + random.randint(5, 10)
+            if request.prevLogIndex == self.last_log_index + 1 and request.prevLogTerm >= self.last_log_term:
+                print("here")
+                self.log[request.entry.index] = request.entry
+                self.last_log_index += 1
+                self.last_log_term = request.prevLogTerm
+                print(self.log)
+                print('Follower got the message')
+                return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
+            elif request.prevLogIndex == self.last_log_index and request.prevLogTerm == self.last_log_term:
+                print('Follower got the message')
+                return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
+            else:
+                print("Follower abort request")
+                return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
+
+
+
+    def update_log(self, request, context):
+        pass
+
 
     def broadcast(self, request, context):
         if self.id == 1:
