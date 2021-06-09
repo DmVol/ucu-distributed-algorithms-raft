@@ -1,5 +1,6 @@
 import random
 import grpc
+from queue import Queue
 from concurrent import futures
 import time
 import proto.raft_pb2_grpc as pb2_grpc
@@ -101,13 +102,10 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                                                       entry=entry, leaderCommit=self.commit_index)
                 response = stub.AppendMessage(request)
 
-        except Exception as e:
-            print(e)
-            print('cannot connect to ' + str(self.port_addr[node_id]))
+            return response
+
         except:
-            print("connection error")
-
-
+            print('cannot connect to ' + str(self.port_addr[node_id]))
 
     def refresh(self):
         if self.current_role == FOLLOWER:
@@ -122,7 +120,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                 request = pb2.RequestVoteRPC(term=self.term, candidateId=self.id, lastLogIndex=self.last_log_index,
                                              lastLogTerm=self.last_log_term)
 
-                barrier = threading.Barrier(self.majority - 1)
+                barrier = threading.Barrier(self.majority - 1, timeout=2)
                 for stub in self.stub_list:
                     threading.Thread(target=self.ask_vote,
                                      args=(request, stub)).start()
@@ -148,7 +146,8 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                 # Append Entries Request.
                 print(f"my term is {self.term} last log term is {self.last_log_term}")
                 request = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id, prevLogIndex=prevLogIndex,
-                                                      prevLogTerm=self.last_log_term, entry=entry, leaderCommit=self.commit_index)
+                                                      prevLogTerm=self.last_log_term, entry=entry,
+                                                      leaderCommit=self.commit_index)
 
                 for node_id, stub in enumerate(self.stub_list):
                     threading.Thread(target=self.broadcast,
@@ -213,21 +212,29 @@ class RaftGRPC(pb2_grpc.RaftServicer):
             self.last_log_index += 1
             self.log[self.last_log_index] = entry
             req = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id, prevLogIndex=self.last_log_index,
-                                              prevLogTerm=self.last_log_term, entry=entry, leaderCommit=self.commit_index)
-            # Broadcast messsages
-            i = 0
-            resp = 0
-            for stub in self.stub_list:
-                try:
-                    response = stub.AppendMessage(req)
-                    print('Got append entries response: {}'.format(response))
-                    resp += 1
-                except:
-                    print('cannot connect to ' + str(self.port_addr[i]))
-                i += 1
+                                              prevLogTerm=self.last_log_term, entry=entry,
+                                              leaderCommit=self.commit_index)
 
-            # wait for majority to commit
-            if resp >= self.majority:
+            # Create objects for threads result handling
+            que = Queue()
+            thread_list = []
+            responses = []
+
+            for node_id, stub in enumerate(self.stub_list):
+                t = threading.Thread(target=lambda q,arg1,arg2,arg3,arg4: q.put(self.broadcast(arg1,arg2,arg3,arg4)),
+                                     args=(que, node_id, self.last_log_index, req, stub))
+                t.start()
+                thread_list.append(t)
+
+            for t in thread_list:
+                t.join()
+
+            while not que.empty():
+                result = que.get()
+                responses.append(result)
+
+            # Count all approves
+            if responses.count(True) >= self.majority - 1:
                 self.commit_index = self.last_log_index
 
         elif self.term == request.term and self.current_role == CANDIDATE:
