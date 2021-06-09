@@ -112,6 +112,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
             if time.time() > self.timeout:
                 print(f"Timeout reached for node {self.id} - becoming candidate")
                 self.current_role = CANDIDATE
+
         elif self.current_role == CANDIDATE:
             if time.time() > self.timeout:
                 self.term += 1
@@ -134,6 +135,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                 self.votes_received = 1
                 self.voted_for = self.id
                 self.timeout = time.time()
+
         elif self.current_role == LEADER:
             print("Node is leader")
             if time.time() > self.timeout:
@@ -211,6 +213,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
             self.last_log_term = self.term
             self.last_log_index += 1
             self.log[self.last_log_index] = entry
+
             req = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id, prevLogIndex=self.last_log_index,
                                               prevLogTerm=self.last_log_term, entry=entry,
                                               leaderCommit=self.commit_index)
@@ -231,7 +234,9 @@ class RaftGRPC(pb2_grpc.RaftServicer):
 
             while not que.empty():
                 result = que.get()
-                responses.append(result)
+                if result:
+                    responses.append(result.success)
+                print(responses, responses.count(True))
 
             # Count all approves
             if responses.count(True) >= self.majority - 1:
@@ -262,6 +267,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                 print('Follower got the message with new log')
                 if request.leaderCommit > self.commit_index:
                     print("committing on follower")
+                    # TODO: Follower commit is not matching with leader
                     self.commit_index = request.leaderCommit
                 return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
             elif request.prevLogIndex == self.last_log_index and request.prevLogTerm == self.last_log_term:
