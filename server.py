@@ -45,6 +45,26 @@ class RaftGRPC(pb2_grpc.RaftServicer):
             stub = pb2_grpc.RaftStub(channel)
             self.stub_list.append(stub)
 
+    def reset_timeout(self):
+        self.timeout = time.time() + random.randint(5, 10)
+
+    def init_timeout(self):
+        self.reset_timeout()
+        # safety guarantee, timeout thread may expire after election
+        if self.timeout_thread and self.timeout_thread.isAlive():
+            return
+        self.timeout_thread = threading.Thread(target=self.timeout_loop)
+        self.timeout_thread.start()
+
+    def timeout_loop(self):
+        # only stop timeout thread when winning the election
+        while self.current_role != LEADER:
+            delta = self.timeout - time.time()
+            if delta < 0:
+                self.current_role = CANDIDATE
+            else:
+                time.sleep(delta)
+
     def ask_vote(self, request, stub):
         try:
             response = stub.Vote(request)
@@ -52,6 +72,41 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                 self.votes_received += 1
         except:
             print("connection error")
+
+    def broadcast(self, node_id, prevLogIndex, request, stub):
+        if prevLogIndex in self.log:
+            entry = self.log[prevLogIndex]
+        else:
+            entry = None
+        try:
+            response = stub.AppendMessage(request)
+            while response.success == False:
+                if prevLogIndex >= 1:
+                    prevLogIndex -= 1
+                print(f"sending entry with index -  index no {prevLogIndex}, current index is {self.last_log_index}")
+                print(entry)
+                entry = self.log[prevLogIndex]
+                request = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id,
+                                                      prevLogIndex=prevLogIndex, prevLogTerm=entry.term,
+                                                      entry=entry, leaderCommit=self.commit_index)
+                response = stub.AppendMessage(request)
+
+            while prevLogIndex < self.last_log_index:
+                prevLogIndex += 1
+                print(f"sending entry with index -  index no {prevLogIndex}, current index is {self.last_log_index}")
+                print(entry)
+                entry = self.log[prevLogIndex]
+                request = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id,
+                                                      prevLogIndex=prevLogIndex, prevLogTerm=entry.term,
+                                                      entry=entry, leaderCommit=self.commit_index)
+                response = stub.AppendMessage(request)
+
+        except Exception as e:
+            print(e)
+            print('cannot connect to ' + str(self.port_addr[node_id]))
+        except:
+            print("connection error")
+
 
 
     def refresh(self):
@@ -74,7 +129,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
 
                 barrier.wait()
                 print(self.votes_received)
-                self.timeout = time.time() + random.randint(5, 10)
+                self.reset_timeout()
             elif self.votes_received >= self.majority:
                 print("becoming leader")
                 self.current_role = LEADER
@@ -94,34 +149,11 @@ class RaftGRPC(pb2_grpc.RaftServicer):
                 print(f"my term is {self.term} last log term is {self.last_log_term}")
                 request = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id, prevLogIndex=prevLogIndex,
                                                       prevLogTerm=self.last_log_term, entry=entry, leaderCommit=self.commit_index)
-                responses = 0
-                for stub in self.stub_list:
-                    try:
-                        response = stub.AppendMessage(request)
-                        while response.success == False:
-                            if prevLogIndex >= 1:
-                                prevLogIndex -= 1
-                            print(f"sending entry with index -  index no {prevLogIndex}, current index is {self.last_log_index}")
-                            print(entry)
-                            entry = self.log[prevLogIndex]
-                            request = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id,
-                                                                  prevLogIndex=prevLogIndex, prevLogTerm=entry.term,
-                                                                  entry=entry, leaderCommit=self.commit_index)
-                            response = stub.AppendMessage(request)
-                        while prevLogIndex < self.last_log_index:
-                            prevLogIndex += 1
-                            print(f"sending entry with index -  index no {prevLogIndex}, current index is {self.last_log_index}")
-                            print(entry)
-                            entry = self.log[prevLogIndex]
-                            request = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id,
-                                                                  prevLogIndex=prevLogIndex, prevLogTerm=entry.term,
-                                                                  entry=entry, leaderCommit=self.commit_index)
-                            response = stub.AppendMessage(request)
 
-                    except Exception as e:
-                        print(e)
-                        print('cannot connect to ' + str(self.port_addr[responses]))
-                    responses += 1
+                for node_id, stub in enumerate(self.stub_list):
+                    threading.Thread(target=self.broadcast,
+                                     args=(node_id, prevLogIndex, request, stub)).start()
+
                 self.timeout = time.time() + 1
 
     def Vote(self, request, context):
@@ -172,7 +204,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
             self.voted_for = -1
             self.current_role = FOLLOWER
             self.current_leader = request.leaderId
-            self.timeout = time.time() + random.randint(5, 10)
+            self.reset_timeout()
             return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
 
         if self.current_role == LEADER:
@@ -201,13 +233,13 @@ class RaftGRPC(pb2_grpc.RaftServicer):
         elif self.term == request.term and self.current_role == CANDIDATE:
             self.current_role = FOLLOWER
             self.current_leader = request.leaderId
-            self.timeout = time.time() + random.randint(5, 10)
+            self.reset_timeout()
             return pb2.ResponseAppendEntriesRPC(term=self.term, success=False)
 
         elif self.current_role == FOLLOWER:
             self.term = request.term
             self.current_leader = request.leaderId
-            self.timeout = time.time() + random.randint(5, 10)
+            self.reset_timeout()
             # Remove unconsistent entries
             # if request.entry.command != "" and self.last_log_index > request.lastLogIndex:
             #     if self.log[request.lastLogIndex].term != request.term:
@@ -232,6 +264,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
             else:
                 print(f"Follower log_index is {self.last_log_index}")
                 return pb2.ResponseAppendEntriesRPC(term=self.term, success=False)
+
 
 if __name__ == '__main__':
 
