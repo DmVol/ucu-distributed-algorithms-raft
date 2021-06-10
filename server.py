@@ -13,7 +13,7 @@ CANDIDATE = "candidate"
 LEADER = "leader"
 
 
-class RaftGRPC(pb2_grpc.RaftServicer):
+class Server(pb2_grpc.RaftServicer):
 
     # Initialization
     def __init__(self, my_dict_address):
@@ -71,6 +71,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
             response = stub.Vote(request)
             if response.voteGranted:
                 self.votes_received += 1
+
         except:
             print("connection error")
 
@@ -81,6 +82,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
             entry = None
         try:
             response = stub.AppendMessage(request)
+            print(response)
             while response.success == False:
                 if prevLogIndex >= 1:
                     prevLogIndex -= 1
@@ -104,58 +106,72 @@ class RaftGRPC(pb2_grpc.RaftServicer):
 
             return response
 
-        except:
+        except Exception as e:
+            print(e)
             print('cannot connect to ' + str(self.port_addr[node_id]))
 
+    def follower_run(self):
+        if time.time() > self.timeout:
+            print(f"Timeout reached for node {self.id} - becoming candidate")
+            self.current_role = CANDIDATE
+
+    def candidate_run(self):
+        if time.time() > self.timeout:
+            self.term += 1
+            self.votes_received = 1
+            print(f"Node {self.id} start sending vote requests")
+            request = pb2.RequestVoteRPC(term=self.term, candidateId=self.id, lastLogIndex=self.last_log_index,
+                                         lastLogTerm=self.last_log_term)
+
+            barrier = threading.Barrier(self.majority - 1, timeout=2)
+            for stub in self.stub_list:
+                threading.Thread(target=self.ask_vote,
+                                 args=(request, stub)).start()
+
+            barrier.wait()
+            print(self.votes_received)
+            self.reset_timeout()
+        elif self.votes_received >= self.majority:
+            print("becoming leader")
+            self.current_role = LEADER
+            self.votes_received = 1
+            self.voted_for = self.id
+            self.timeout = time.time()
+
+    def leader_run(self):
+        if time.time() > self.timeout:
+            print("Start sending requests")
+            prevLogIndex = self.last_log_index
+            if prevLogIndex in self.log:
+                entry = self.log[prevLogIndex]
+            else:
+                entry = None
+            # Append Entries Request.
+            print(f"my term is {self.term} last log term is {self.last_log_term}")
+            request = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id, prevLogIndex=prevLogIndex,
+                                                  prevLogTerm=self.last_log_term, entry=entry,
+                                                  leaderCommit=self.commit_index)
+
+            for node_id, stub in enumerate(self.stub_list):
+                threading.Thread(target=self.broadcast,
+                                 args=(node_id, prevLogIndex, request, stub)).start()
+
+            self.timeout = time.time() + 1
+
     def refresh(self):
+
         if self.current_role == FOLLOWER:
-            if time.time() > self.timeout:
-                print(f"Timeout reached for node {self.id} - becoming candidate")
-                self.current_role = CANDIDATE
+            print(f"{self.id} is follower")
+            self.follower_run()
 
         elif self.current_role == CANDIDATE:
-            if time.time() > self.timeout:
-                self.term += 1
-                self.votes_received = 1
-                print(f"Node {self.id} start sending vote requests")
-                request = pb2.RequestVoteRPC(term=self.term, candidateId=self.id, lastLogIndex=self.last_log_index,
-                                             lastLogTerm=self.last_log_term)
-
-                barrier = threading.Barrier(self.majority - 1, timeout=2)
-                for stub in self.stub_list:
-                    threading.Thread(target=self.ask_vote,
-                                     args=(request, stub)).start()
-
-                barrier.wait()
-                print(self.votes_received)
-                self.reset_timeout()
-            elif self.votes_received >= self.majority:
-                print("becoming leader")
-                self.current_role = LEADER
-                self.votes_received = 1
-                self.voted_for = self.id
-                self.timeout = time.time()
+            print(f"{self.id} is candidate")
+            self.candidate_run()
 
         elif self.current_role == LEADER:
-            print("Node is leader")
-            if time.time() > self.timeout:
-                print("Start sending requests")
-                prevLogIndex = self.last_log_index
-                if prevLogIndex in self.log:
-                    entry = self.log[prevLogIndex]
-                else:
-                    entry = None
-                # Append Entries Request.
-                print(f"my term is {self.term} last log term is {self.last_log_term}")
-                request = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id, prevLogIndex=prevLogIndex,
-                                                      prevLogTerm=self.last_log_term, entry=entry,
-                                                      leaderCommit=self.commit_index)
+            print(f"{self.id} is leader")
+            self.leader_run()
 
-                for node_id, stub in enumerate(self.stub_list):
-                    threading.Thread(target=self.broadcast,
-                                     args=(node_id, prevLogIndex, request, stub)).start()
-
-                self.timeout = time.time() + 1
 
     def Vote(self, request, context):
         print(f"Node {self.id} received vote request")
@@ -183,7 +199,7 @@ class RaftGRPC(pb2_grpc.RaftServicer):
             self.term = request.term
             self.current_role = FOLLOWER
             self.voted_for = request.candidateId
-            self.timeout = time.time() + random.randint(5, 10)
+            self.reset_timeout()
             return pb2.ResponseVoteRPC(term=self.term, voteGranted=True)
         else:
             print("Vote rejected")
@@ -195,88 +211,100 @@ class RaftGRPC(pb2_grpc.RaftServicer):
         response = pb2.ListMessagesResponse(logs=list(self.log.values()))
         return response
 
+    def become_follower(self, request):
+        print("term is greater than mine")
+        self.term = request.term
+        self.voted_for = -1
+        self.current_role = FOLLOWER
+        self.current_leader = request.leaderId
+        self.reset_timeout()
+        return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
+
+    def leader_append(self, request):
+        entry = pb2.LogEntry(term=self.term, command=request.entry.command)
+        self.last_log_term = self.term
+        self.last_log_index += 1
+        self.log[self.last_log_index] = entry
+
+        req = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id, prevLogIndex=self.last_log_index,
+                                          prevLogTerm=self.last_log_term, entry=entry,
+                                          leaderCommit=self.commit_index)
+
+        # Create objects for threads result handling
+        que = Queue()
+        thread_list = []
+        responses = []
+
+        for node_id, stub in enumerate(self.stub_list):
+            t = threading.Thread(target=lambda q, arg1, arg2, arg3, arg4: q.put(self.broadcast(arg1, arg2, arg3, arg4)),
+                                 args=(que, node_id, self.last_log_index, req, stub))
+            t.start()
+            thread_list.append(t)
+
+        for t in thread_list:
+            t.join()
+
+        while not que.empty():
+            result = que.get()
+            if result:
+                responses.append(result.success)
+            print(responses, responses.count(True))
+
+        # Count all approves
+        if responses.count(True) >= self.majority - 1:
+            self.commit_index = self.last_log_index
+
+        return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
+
+    def follower_append(self, request):
+        self.term = request.term
+        self.current_leader = request.leaderId
+        self.reset_timeout()
+        print("here")
+        if request.leaderCommit > self.commit_index:
+            print("committing on follower")
+            self.commit_index = request.leaderCommit
+        # Remove unconsistent entries
+        # if request.entry.command != "" and self.last_log_index > request.lastLogIndex:
+        #     if self.log[request.lastLogIndex].term != request.term:
+        #         del self.log[request.lastLogIndex:]
+        print(f"follower index {self.last_log_index} and request index is {request.prevLogIndex}")
+        print(f"follower log term {self.last_log_term} and request term is {request.prevLogTerm}")
+        if (request.prevLogIndex == self.last_log_index + 1) and request.prevLogTerm >= self.last_log_term:
+            print(f"received data for log index {self.last_log_index}")
+            print(request)
+            self.log[request.prevLogIndex] = request.entry
+            self.last_log_index += 1
+            self.last_log_term = request.prevLogTerm
+            print('Follower got the message with new log')
+            return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
+        elif request.prevLogIndex == self.last_log_index and request.prevLogTerm == self.last_log_term:
+            print('Follower got the message')
+            print(f"got empty request {self.last_log_index}")
+            return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
+        else:
+            print(f"Follower log_index is {self.last_log_index}")
+            return pb2.ResponseAppendEntriesRPC(term=self.term, success=False)
+
     def AppendMessage(self, request, context):
         # if self.term < request.term:
         #     print("Term is lower than in request")
         #     return pb2.ResponseAppendEntriesRPC(term=self.term, success=False)
         if request.term > self.term:
-            print("term is reater than mine")
-            self.term = request.term
-            self.voted_for = -1
-            self.current_role = FOLLOWER
-            self.current_leader = request.leaderId
-            self.reset_timeout()
-            return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
+            response = self.become_follower(request)
+            return response
 
         if self.current_role == LEADER:
-            entry = pb2.LogEntry(term=self.term, command=request.entry.command)
-            self.last_log_term = self.term
-            self.last_log_index += 1
-            self.log[self.last_log_index] = entry
+            response = self.leader_append(request)
+            return response
 
-            req = pb2.RequestAppendEntriesRPC(term=self.term, leaderId=self.id, prevLogIndex=self.last_log_index,
-                                              prevLogTerm=self.last_log_term, entry=entry,
-                                              leaderCommit=self.commit_index)
-
-            # Create objects for threads result handling
-            que = Queue()
-            thread_list = []
-            responses = []
-
-            for node_id, stub in enumerate(self.stub_list):
-                t = threading.Thread(target=lambda q,arg1,arg2,arg3,arg4: q.put(self.broadcast(arg1,arg2,arg3,arg4)),
-                                     args=(que, node_id, self.last_log_index, req, stub))
-                t.start()
-                thread_list.append(t)
-
-            for t in thread_list:
-                t.join()
-
-            while not que.empty():
-                result = que.get()
-                if result:
-                    responses.append(result.success)
-                print(responses, responses.count(True))
-
-            # Count all approves
-            if responses.count(True) >= self.majority - 1:
-                self.commit_index = self.last_log_index
-
-        elif self.term == request.term and self.current_role == CANDIDATE:
-            self.current_role = FOLLOWER
-            self.current_leader = request.leaderId
-            self.reset_timeout()
-            return pb2.ResponseAppendEntriesRPC(term=self.term, success=False)
+        elif self.current_role == CANDIDATE:
+            response = self.become_follower(request)
+            return response
 
         elif self.current_role == FOLLOWER:
-            self.term = request.term
-            self.current_leader = request.leaderId
-            self.reset_timeout()
-            # Remove unconsistent entries
-            # if request.entry.command != "" and self.last_log_index > request.lastLogIndex:
-            #     if self.log[request.lastLogIndex].term != request.term:
-            #         del self.log[request.lastLogIndex:]
-            print(f"follower index {self.last_log_index} and request index is {request.prevLogIndex}")
-            print(f"follower log term {self.last_log_term} and request term is {request.prevLogTerm}")
-            if (request.prevLogIndex == self.last_log_index + 1) and request.prevLogTerm >= self.last_log_term:
-                print(f"received data for log index {self.last_log_index}")
-                print(request)
-                self.log[request.prevLogIndex] = request.entry
-                self.last_log_index += 1
-                self.last_log_term = request.prevLogTerm
-                print('Follower got the message with new log')
-                if request.leaderCommit > self.commit_index:
-                    print("committing on follower")
-                    # TODO: Follower commit is not matching with leader
-                    self.commit_index = request.leaderCommit
-                return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
-            elif request.prevLogIndex == self.last_log_index and request.prevLogTerm == self.last_log_term:
-                print('Follower got the message')
-                print(f"got empty request {self.last_log_index}")
-                return pb2.ResponseAppendEntriesRPC(term=self.term, success=True)
-            else:
-                print(f"Follower log_index is {self.last_log_index}")
-                return pb2.ResponseAppendEntriesRPC(term=self.term, success=False)
+            response = self.follower_append(request)
+            return response
 
 
 if __name__ == '__main__':
@@ -290,7 +318,7 @@ if __name__ == '__main__':
             my_dict_address[temp_list[0]] = temp_list[1]
             line = f.readline()
 
-    raft_server = RaftGRPC(my_dict_address)
+    raft_server = Server(my_dict_address)
     server = grpc.server(futures.ThreadPoolExecutor())
     pb2_grpc.add_RaftServicer_to_server(raft_server, server)
     server.add_insecure_port('[::]:' + sys.argv[1])
