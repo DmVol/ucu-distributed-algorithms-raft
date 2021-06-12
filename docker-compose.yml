@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+
+  raft-node-1:
+    container_name: raft-node-1
+    build:
+      context: container/
+      dockerfile: Dockerfile
+    command: python3 server_new.py 50051 1
+    ports:
+      - "50051"
+    networks:
+      - localnet
+
+  raft-node-2:
+    container_name: raft-node-2
+    build:
+      context: container/
+      dockerfile: Dockerfile
+    command: python3 server_new.py 50052 2
+    ports:
+      - "50052:50052"
+    networks:
+      - localnet
+
+  raft-node-3:
+    container_name: raft-node-3
+    build:
+      context: container/
+      dockerfile: Dockerfile
+    command: python3 server_new.py 50053 3
+    ports:
+      - "50053:50053"
+    networks:
+      - localnet
+
+
+networks:
+  localnet:
+    attachable: true

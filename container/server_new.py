@@ -41,7 +41,7 @@ class Server(pb2_grpc.RaftServicer):
             self.port_addr.append(tmp)
 
         for self.address in self.my_dict_address.values():
-            print('{}:{}'.format("localhost", self.address.split(":")[1]))
+            print('{}:{}'.format(self.address.split(":")[0], self.address.split(":")[1]))
             channel = grpc.insecure_channel(self.address)
             stub = pb2_grpc.RaftStub(channel)
             self.stub_list.append(stub)
