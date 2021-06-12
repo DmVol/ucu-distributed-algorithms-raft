@@ -1,12 +1,10 @@
 import random
 import grpc
-from queue import Queue
+import logging
 from concurrent import futures
 import time
 import proto.raft_pb2_grpc as pb2_grpc
-import proto.raft_pb2 as pb2
 import sys
-import threading
 from states import Candidate, Follower, Leader
 
 FOLLOWER = "follower"
@@ -48,6 +46,8 @@ class Server(pb2_grpc.RaftServicer):
             stub = pb2_grpc.RaftStub(channel)
             self.stub_list.append(stub)
 
+        logging.info(f"Node {self.id} initialized")
+
     def become(self, state):
         self.role = state(self)
         self.refresh()
@@ -55,18 +55,22 @@ class Server(pb2_grpc.RaftServicer):
     def refresh(self):
         self.role.run()
 
-
     def Vote(self, request, context):
+        logging.info(f"Node {self.id} received vote request")
         response = self.role.vote(request, context)
+        logging.info(f"Node {self.id} voted - vote granted: {response.voteGranted}")
         return response
 
     def ListMessages(self, request, context):
+        logging.info(f"Node {self.id} received list messages request")
         response = self.role.list_messages(request)
         return response
 
     def AppendMessage(self, request, context):
+        logging.info(f"Node {self.id} append message request")
         response = self.role.append(request)
         return response
+
 
 if __name__ == '__main__':
 

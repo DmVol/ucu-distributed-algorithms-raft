@@ -3,6 +3,8 @@ from queue import Queue
 import time
 import proto.raft_pb2 as pb2
 import threading
+import logging
+
 
 FOLLOWER = "follower"
 CANDIDATE = "candidate"
@@ -34,7 +36,6 @@ class State:
                 time.sleep(delta)
 
     def vote(self, request, context):
-        print(f"Node {self.server.id} received vote request")
         term_ok, log_ok = False, False
 
         # Check log
@@ -55,19 +56,16 @@ class State:
 
         # Return response
         if term_ok and log_ok:
-            print("Vote granted")
             self.server.term = request.term
             self.server.current_role = FOLLOWER
             self.server.voted_for = request.candidateId
             self.reset_timeout()
             return pb2.ResponseVoteRPC(term=self.server.term, voteGranted=True)
         else:
-            print("Vote rejected")
             return pb2.ResponseVoteRPC(term=self.server.term, voteGranted=False)
 
     def list_messages(self, request):
-        print(self.server.log)
-        print(self.server.commit_index)
+        print(f"Node {self.server.id} commit index is {self.server.commit_index}")
         response = pb2.ListMessagesResponse(logs=list(self.server.log.values()))
         return response
 
@@ -89,7 +87,7 @@ class Leader(State):
             while response.success == False:
                 if prevLogIndex >= 1:
                     prevLogIndex -= 1
-                print(f"sending entry with index -  index no {prevLogIndex}, current index is {self.server.last_log_index}")
+                logging.info(f"sending entry with index -  index no {prevLogIndex}, current index is {self.server.last_log_index}")
                 entry = self.server.log[prevLogIndex]
                 request = pb2.RequestAppendEntriesRPC(term=self.server.term, leaderId=self.server.id,
                                                       prevLogIndex=prevLogIndex, prevLogTerm=entry.term,
@@ -98,8 +96,7 @@ class Leader(State):
 
             while prevLogIndex < self.server.last_log_index:
                 prevLogIndex += 1
-                print(f"sending entry with index -  index no {prevLogIndex}, current index is {self.server.last_log_index}")
-                print(entry)
+                logging.info(f"sending entry with index -  index no {prevLogIndex}, current index is {self.server.last_log_index}")
                 entry = self.server.log[prevLogIndex]
                 request = pb2.RequestAppendEntriesRPC(term=self.server.term, leaderId=self.server.id,
                                                       prevLogIndex=prevLogIndex, prevLogTerm=entry.term,
@@ -108,21 +105,20 @@ class Leader(State):
 
             return response
 
-        except Exception as e:
-            print(e)
+        except:
             print('cannot connect to ' + str(self.server.port_addr[node_id]))
 
     def run(self):
-        print(f"{self.server.id} is leader")
+        logging.info(f"{self.server.id} is leader")
         if time.time() > self.server.timeout:
-            print("Start sending requests")
+            logging.info(f"Node {self.server.id} start sending requests")
             prevLogIndex = self.server.last_log_index
             if prevLogIndex in self.server.log:
                 entry = self.server.log[prevLogIndex]
             else:
                 entry = None
             # Append Entries Request.
-            print(f"my term is {self.server.term} last log term is {self.server.last_log_term}")
+            logging.info(f"my term is {self.server.term} last log term is {self.server.last_log_term}")
             request = pb2.RequestAppendEntriesRPC(term=self.server.term, leaderId=self.server.id, prevLogIndex=prevLogIndex,
                                                   prevLogTerm=self.server.last_log_term, entry=entry,
                                                   leaderCommit=self.server.commit_index)
@@ -173,7 +169,7 @@ class Leader(State):
         return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=True)
 
     def become_follower(self, request):
-        print("term is greater than mine")
+        logging.info(f"term in request is greater than mine node {self.server.id} is becoming follower")
         self.server.term = request.term
         self.server.voted_for = -1
         # self.server.current_role = FOLLOWER
@@ -203,7 +199,7 @@ class Candidate(State):
         if time.time() > self.server.timeout:
             self.server.term += 1
             self.server.votes_received = 1
-            print(f"Node {self.server.id} start sending vote requests")
+            logging.info(f"node {self.server.id} is becoming candidate, start sending vote requests")
             request = pb2.RequestVoteRPC(term=self.server.term, candidateId=self.server.id, lastLogIndex=self.server.last_log_index,
                                          lastLogTerm=self.server.last_log_term)
 
@@ -213,10 +209,10 @@ class Candidate(State):
                                  args=(request, stub)).start()
 
             barrier.wait()
-            print(self.server.votes_received)
+            # print(self.server.votes_received)
             self.reset_timeout()
         elif self.server.votes_received >= self.server.majority:
-            print("becoming leader")
+            logging.info(f"node {self.server.id} received majority votes, becoming leader")
             # self.server.current_role = LEADER
             self.server.votes_received = 1
             self.server.voted_for = self.server.id
@@ -224,14 +220,14 @@ class Candidate(State):
             self.server.become(Leader)
 
     def become_follower(self, request):
-        print("term is greater than mine")
+        logging.info(f"term in request is greater than mine node {self.server.id} is becoming follower")
         self.server.term = request.term
         self.server.voted_for = -1
         # self.server.current_role = FOLLOWER
         self.server.current_leader = request.leaderId
         self.reset_timeout()
         self.server.become(Follower)
-        return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=True)
+        return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=False)
 
     def append(self, request):
         if request.term > self.server.term:
@@ -248,35 +244,33 @@ class Follower(State):
 
     def run(self):
         if time.time() > self.server.timeout:
-            print(f"Timeout reached for node {self.server.id} - becoming candidate")
+            logging.info(f"timeout reached for node {self.server.id}, becoming candidate")
             self.server.become(Candidate)
 
     def append(self, request):
         self.server.term = request.term
         self.server.current_leader = request.leaderId
         self.reset_timeout()
-        print("here")
         if request.leaderCommit > self.server.commit_index:
-            print("committing on follower")
+            logging.info(f"follower node {self.server.id} commit sync")
             self.server.commit_index = request.leaderCommit
         # Remove unconsistent entries
         # if request.entry.command != "" and self.server.last_log_index > request.lastLogIndex:
         #     if self.server.log[request.lastLogIndex].term != request.term:
         #         del self.server.log[request.lastLogIndex:]
-        print(f"follower index {self.server.last_log_index} and request index is {request.prevLogIndex}")
-        print(f"follower log term {self.server.last_log_term} and request term is {request.prevLogTerm}")
+        logging.info(f"follower index {self.server.last_log_index} and request index is {request.prevLogIndex}")
+        logging.info(f"follower log term {self.server.last_log_term} and request term is {request.prevLogTerm}")
+        logging.info(f"follower term {self.server.term}")
         if (request.prevLogIndex == self.server.last_log_index + 1) and request.prevLogTerm >= self.server.last_log_term:
-            print(f"received data for log index {self.server.last_log_index}")
-            print(request)
+            logging.info(f"received data for log index {self.server.last_log_index}")
             self.server.log[request.prevLogIndex] = request.entry
             self.server.last_log_index += 1
             self.server.last_log_term = request.prevLogTerm
-            print('Follower got the message with new log')
+            logging.info(f"follower {self.server.id} received the message with new log")
             return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=True)
         elif request.prevLogIndex == self.server.last_log_index and request.prevLogTerm == self.server.last_log_term:
-            print('Follower got the message')
-            print(f"got empty request {self.server.last_log_index}")
+            logging.info(f"follower {self.server.id} received heartbeat")
             return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=True)
         else:
-            print(f"Follower log_index is {self.server.last_log_index}")
+            logging.info(f"follower {self.server.id} aborted request")
             return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=False)
