@@ -3,8 +3,8 @@ import grpc
 from queue import Queue
 from concurrent import futures
 import time
-import proto.raft_pb2_grpc as pb2_grpc
-import proto.raft_pb2 as pb2
+import container.proto.raft_pb2_grpc as pb2_grpc
+import container.proto.raft_pb2 as pb2
 import sys
 import threading
 

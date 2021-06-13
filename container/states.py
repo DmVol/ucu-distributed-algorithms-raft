@@ -65,7 +65,7 @@ class State:
             return pb2.ResponseVoteRPC(term=self.server.term, voteGranted=False)
 
     def list_messages(self, request):
-        print(f"Node {self.server.id} commit index is {self.server.commit_index}")
+        logging.info(f"Node {self.server.id} commit index is {self.server.commit_index}")
         response = pb2.ListMessagesResponse(logs=list(self.server.log.values()))
         return response
 
@@ -106,7 +106,7 @@ class Leader(State):
             return response
 
         except:
-            print('cannot connect to ' + str(self.server.port_addr[node_id]))
+            logging.info('cannot connect to ' + str(self.server.port_addr[node_id]))
 
     def run(self):
         logging.info(f"{self.server.id} is leader")
@@ -160,7 +160,7 @@ class Leader(State):
             result = que.get()
             if result:
                 responses.append(result.success)
-            print(responses, responses.count(True))
+            # print(responses, responses.count(True))
 
         # Count all approves
         if responses.count(True) >= self.server.majority - 1:
@@ -193,7 +193,7 @@ class Candidate(State):
                 self.server.votes_received += 1
 
         except:
-            print("connection error")
+            logging.info("connection error")
 
     def run(self):
         if time.time() > self.server.timeout:

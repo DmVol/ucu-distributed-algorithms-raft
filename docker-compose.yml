@@ -1,5 +1,9 @@
 version: '3.8'
 
+networks:
+  localnet:
+    attachable: true
+
 services:
 
   raft-node-1:
@@ -7,6 +11,8 @@ services:
     build:
       context: container/
       dockerfile: Dockerfile
+    environment:
+      PYTHONUNBUFFERED: 1
     command: python3 server_new.py 50051 1
     ports:
       - "50051"
@@ -18,6 +24,8 @@ services:
     build:
       context: container/
       dockerfile: Dockerfile
+    environment:
+      PYTHONUNBUFFERED: 1
     command: python3 server_new.py 50052 2
     ports:
       - "50052:50052"
@@ -29,13 +37,10 @@ services:
     build:
       context: container/
       dockerfile: Dockerfile
+    environment:
+      PYTHONUNBUFFERED: 1
     command: python3 server_new.py 50053 3
     ports:
       - "50053:50053"
     networks:
       - localnet
-
-
-networks:
-  localnet:
-    attachable: true

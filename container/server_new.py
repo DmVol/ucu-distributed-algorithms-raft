@@ -41,7 +41,7 @@ class Server(pb2_grpc.RaftServicer):
             self.port_addr.append(tmp)
 
         for self.address in self.my_dict_address.values():
-            print('{}:{}'.format(self.address.split(":")[0], self.address.split(":")[1]))
+            # print('{}:{}'.format(self.address.split(":")[0], self.address.split(":")[1]))
             channel = grpc.insecure_channel(self.address)
             stub = pb2_grpc.RaftStub(channel)
             self.stub_list.append(stub)
@@ -72,20 +72,20 @@ class Server(pb2_grpc.RaftServicer):
         return response
 
 
-if __name__ == '__main__':
-
+def serve():
     my_dict_address = {}
     with open('servers.txt', 'r') as f:
         line = f.readline()
         while line:
             temp_list = line.split()
-            print(temp_list)
+            # print(temp_list)
             my_dict_address[temp_list[0]] = temp_list[1]
             line = f.readline()
 
     raft_server = Server(my_dict_address)
     server = grpc.server(futures.ThreadPoolExecutor())
     pb2_grpc.add_RaftServicer_to_server(raft_server, server)
+
     server.add_insecure_port('[::]:' + sys.argv[1])
     server.start()
     try:
@@ -94,3 +94,8 @@ if __name__ == '__main__':
             raft_server.refresh()
     except KeyboardInterrupt:
         server.stop(0)
+
+if __name__ == '__main__':
+    logging.basicConfig()
+    logging.getLogger().setLevel(logging.INFO)
+    serve()
