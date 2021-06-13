@@ -1,3 +1,5 @@
 1 raft-node-1:50051
 2 raft-node-2:50052
 3 raft-node-3:50053
+4 raft-node-4:50054
+5 raft-node-5:50055

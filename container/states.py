@@ -5,14 +5,12 @@ import proto.raft_pb2 as pb2
 import threading
 import logging
 
-
 FOLLOWER = "follower"
 CANDIDATE = "candidate"
 LEADER = "leader"
 
 
 class State:
-
     server: "Server"
 
     def reset_timeout(self):
@@ -56,10 +54,10 @@ class State:
 
         # Return response
         if term_ok and log_ok:
+            self.reset_timeout()
             self.server.term = request.term
             self.server.current_role = FOLLOWER
             self.server.voted_for = request.candidateId
-            self.reset_timeout()
             return pb2.ResponseVoteRPC(term=self.server.term, voteGranted=True)
         else:
             return pb2.ResponseVoteRPC(term=self.server.term, voteGranted=False)
@@ -84,10 +82,16 @@ class Leader(State):
             entry = None
         try:
             response = stub.AppendMessage(request)
+
+            if response.success == False and response.term > self.server.term:
+                logging.info(f"killing thread on node {self.server.id}")
+                self.reset_timeout()
+
             while response.success == False:
                 if prevLogIndex >= 1:
                     prevLogIndex -= 1
-                logging.info(f"sending entry with index -  index no {prevLogIndex}, current index is {self.server.last_log_index}")
+                logging.info(
+                    f"sending entry with index -  index no {prevLogIndex}, current index is {self.server.last_log_index}")
                 entry = self.server.log[prevLogIndex]
                 request = pb2.RequestAppendEntriesRPC(term=self.server.term, leaderId=self.server.id,
                                                       prevLogIndex=prevLogIndex, prevLogTerm=entry.term,
@@ -96,7 +100,8 @@ class Leader(State):
 
             while prevLogIndex < self.server.last_log_index:
                 prevLogIndex += 1
-                logging.info(f"sending entry with index -  index no {prevLogIndex}, current index is {self.server.last_log_index}")
+                logging.info(
+                    f"sending entry with index -  index no {prevLogIndex}, current index is {self.server.last_log_index}")
                 entry = self.server.log[prevLogIndex]
                 request = pb2.RequestAppendEntriesRPC(term=self.server.term, leaderId=self.server.id,
                                                       prevLogIndex=prevLogIndex, prevLogTerm=entry.term,
@@ -119,26 +124,40 @@ class Leader(State):
                 entry = None
             # Append Entries Request.
             logging.info(f"my term is {self.server.term} last log term is {self.server.last_log_term}")
-            request = pb2.RequestAppendEntriesRPC(term=self.server.term, leaderId=self.server.id, prevLogIndex=prevLogIndex,
+            request = pb2.RequestAppendEntriesRPC(term=self.server.term, leaderId=self.server.id,
+                                                  prevLogIndex=prevLogIndex,
                                                   prevLogTerm=self.server.last_log_term, entry=entry,
                                                   leaderCommit=self.server.commit_index)
 
+            threads = []
+
             for node_id, stub in enumerate(self.server.stub_list):
-                threading.Thread(target=self.broadcast,
-                                 args=(node_id, prevLogIndex, request, stub)).start()
+                t = threading.Thread(target=self.broadcast,
+                                     args=(node_id, prevLogIndex, request, stub))
+                threads.append(t)
+                t.start()
+
+            for x in threads:
+                x.join(timeout=1)
 
             self.server.timeout = time.time() + 1
 
     def append(self, request):
         if request.term > self.server.term:
-            response = self.server.become_follower(request)
+            response = self.become_follower(request)
             return response
+
+        if request.term < self.server.term:
+            logging.info(f"omg, you are pinging leader, how dare you??!!")
+            return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=False)
+
         entry = pb2.LogEntry(term=self.server.term, command=request.entry.command)
         self.server.last_log_term = self.server.term
         self.server.last_log_index += 1
         self.server.log[self.server.last_log_index] = entry
 
-        req = pb2.RequestAppendEntriesRPC(term=self.server.term, leaderId=self.server.id, prevLogIndex=self.server.last_log_index,
+        req = pb2.RequestAppendEntriesRPC(term=self.server.term, leaderId=self.server.id,
+                                          prevLogIndex=self.server.last_log_index,
                                           prevLogTerm=self.server.last_log_term, entry=entry,
                                           leaderCommit=self.server.commit_index)
 
@@ -154,7 +173,7 @@ class Leader(State):
             thread_list.append(t)
 
         for t in thread_list:
-            t.join()
+            t.join(timeout=1)
 
         while not que.empty():
             result = que.get()
@@ -186,11 +205,13 @@ class Candidate(State):
         self.server = server
         self.server.current_role = CANDIDATE
 
-    def ask_vote(self, request, stub):
+    def ask_vote(self, barrier, request, stub):
         try:
             response = stub.Vote(request)
             if response.voteGranted:
                 self.server.votes_received += 1
+                logging.info(f"node {self.server.id} received {self.server.votes_received} votes")
+                barrier.wait()
 
         except:
             logging.info("connection error")
@@ -199,17 +220,25 @@ class Candidate(State):
         if time.time() > self.server.timeout:
             self.server.term += 1
             self.server.votes_received = 1
+            logging.info(f"mjority is equal to {self.server.majority}")
             logging.info(f"node {self.server.id} is becoming candidate, start sending vote requests")
-            request = pb2.RequestVoteRPC(term=self.server.term, candidateId=self.server.id, lastLogIndex=self.server.last_log_index,
+            request = pb2.RequestVoteRPC(term=self.server.term, candidateId=self.server.id,
+                                         lastLogIndex=self.server.last_log_index,
                                          lastLogTerm=self.server.last_log_term)
 
-            barrier = threading.Barrier(self.server.majority - 1, timeout=2)
+            barrier = threading.Barrier(self.server.majority - 1, timeout=5)
+
             for stub in self.server.stub_list:
                 threading.Thread(target=self.ask_vote,
-                                 args=(request, stub)).start()
+                                 args=(barrier, request, stub)).start()
 
             barrier.wait()
-            # print(self.server.votes_received)
+            logging.info(str(barrier.broken) + "\n")
+            barrier.reset()
+            logging.info("n_waiting after reset = " + str(barrier.n_waiting))
+            barrier.abort()
+            logging.info("End")
+            logging.info(f"node {self.server.id} received {self.server.votes_received} votes")
             self.reset_timeout()
         elif self.server.votes_received >= self.server.majority:
             logging.info(f"node {self.server.id} received majority votes, becoming leader")
@@ -231,7 +260,7 @@ class Candidate(State):
 
     def append(self, request):
         if request.term > self.server.term:
-            response = self.server.become_follower(request)
+            response = self.become_follower(request)
             return response
 
 
@@ -251,16 +280,26 @@ class Follower(State):
         self.server.term = request.term
         self.server.current_leader = request.leaderId
         self.reset_timeout()
-        if request.leaderCommit > self.server.commit_index:
+        if request.term < self.server.term:
+            logging.info(f"follower term :{self.server.term} is greater that in request {request.term}")
+            return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=False)
+
+        # Remove uncommitted entries
+        if self.server.log and self.server.last_log_term < request.prevLogTerm and self.server.last_log_index > self.server.commit_index:
+            # del self.server.log[request.lastLogIndex:]
+            logging.info(f"follower node {self.server.id} removing entity {request.prevLogIndex}")
+            self.server.log.pop(request.prevLogIndex, None)
+            self.server.last_log_index = self.server.commit_index
+            return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=False)
+
+        if request.leaderCommit > self.server.commit_index and request.leaderCommit == self.server.last_log_index:
             logging.info(f"follower node {self.server.id} commit sync")
             self.server.commit_index = request.leaderCommit
-        # Remove unconsistent entries
-        # if request.entry.command != "" and self.server.last_log_index > request.lastLogIndex:
-        #     if self.server.log[request.lastLogIndex].term != request.term:
-        #         del self.server.log[request.lastLogIndex:]
+
         logging.info(f"follower index {self.server.last_log_index} and request index is {request.prevLogIndex}")
         logging.info(f"follower log term {self.server.last_log_term} and request term is {request.prevLogTerm}")
         logging.info(f"follower term {self.server.term}")
+
         if (request.prevLogIndex == self.server.last_log_index + 1) and request.prevLogTerm >= self.server.last_log_term:
             logging.info(f"received data for log index {self.server.last_log_index}")
             self.server.log[request.prevLogIndex] = request.entry
@@ -268,9 +307,11 @@ class Follower(State):
             self.server.last_log_term = request.prevLogTerm
             logging.info(f"follower {self.server.id} received the message with new log")
             return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=True)
+
         elif request.prevLogIndex == self.server.last_log_index and request.prevLogTerm == self.server.last_log_term:
             logging.info(f"follower {self.server.id} received heartbeat")
             return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=True)
+
         else:
             logging.info(f"follower {self.server.id} aborted request")
             return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=False)

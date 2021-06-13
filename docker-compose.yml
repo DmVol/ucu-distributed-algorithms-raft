@@ -15,7 +15,7 @@ services:
       PYTHONUNBUFFERED: 1
     command: python3 server_new.py 50051 1
     ports:
-      - "50051"
+      - "50051:50051"
     networks:
       - localnet
 
@@ -42,5 +42,31 @@ services:
     command: python3 server_new.py 50053 3
     ports:
       - "50053:50053"
+    networks:
+      - localnet
+
+  raft-node-4:
+    container_name: raft-node-4
+    build:
+      context: container/
+      dockerfile: Dockerfile
+    environment:
+      PYTHONUNBUFFERED: 1
+    command: python3 server_new.py 50054 4
+    ports:
+      - "50054:50054"
+    networks:
+      - localnet
+
+  raft-node-5:
+    container_name: raft-node-5
+    build:
+      context: container/
+      dockerfile: Dockerfile
+    environment:
+      PYTHONUNBUFFERED: 1
+    command: python3 server_new.py 50055 5
+    ports:
+      - "50055:50055"
     networks:
       - localnet
