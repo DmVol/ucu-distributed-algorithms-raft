@@ -87,6 +87,8 @@ class Leader(State):
                 logging.info(f"killing thread on node {self.server.id}")
                 self.reset_timeout()
 
+            time.sleep(random.uniform(0, 1))
+
             while response.success == False:
                 if prevLogIndex >= 1:
                     prevLogIndex -= 1
@@ -138,7 +140,7 @@ class Leader(State):
                 t.start()
 
             for x in threads:
-                x.join(timeout=1)
+                x.join(timeout=2)
 
             self.server.timeout = time.time() + 1
 
@@ -285,16 +287,18 @@ class Follower(State):
             return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=False)
 
         # Remove uncommitted entries
-        if self.server.log and self.server.last_log_term < request.prevLogTerm and self.server.last_log_index > self.server.commit_index:
+        if self.server.commit_index > 0 and self.server.last_log_term < request.prevLogTerm and self.server.last_log_index > self.server.commit_index:
             # del self.server.log[request.lastLogIndex:]
             logging.info(f"follower node {self.server.id} removing entity {request.prevLogIndex}")
             self.server.log.pop(request.prevLogIndex, None)
             self.server.last_log_index = self.server.commit_index
             return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=False)
 
-        if request.leaderCommit > self.server.commit_index and request.leaderCommit == self.server.last_log_index:
+        if request.leaderCommit > self.server.commit_index:
             logging.info(f"follower node {self.server.id} commit sync")
-            self.server.commit_index = request.leaderCommit
+            for i in range(self.server.commit_index, request.leaderCommit + 1):
+                if i in self.server.log:
+                    self.server.commit_index = i
 
         logging.info(f"follower index {self.server.last_log_index} and request index is {request.prevLogIndex}")
         logging.info(f"follower log term {self.server.last_log_term} and request term is {request.prevLogTerm}")
@@ -302,10 +306,11 @@ class Follower(State):
 
         if (request.prevLogIndex == self.server.last_log_index + 1) and request.prevLogTerm >= self.server.last_log_term:
             logging.info(f"received data for log index {self.server.last_log_index}")
+
             self.server.log[request.prevLogIndex] = request.entry
             self.server.last_log_index += 1
             self.server.last_log_term = request.prevLogTerm
-            logging.info(f"follower {self.server.id} received the message with new log")
+            logging.info(f"follower {self.server.id} received the message with new log {request.prevLogIndex}")
             return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=True)
 
         elif request.prevLogIndex == self.server.last_log_index and request.prevLogTerm == self.server.last_log_term:
