@@ -14,7 +14,7 @@ class State:
     server: "Server"
 
     def reset_timeout(self):
-        self.server.timeout = time.time() + random.randint(5, 10)
+        self.server.timeout = time.time() + random.randint(10, 20)
 
     def init_timeout(self):
         self.reset_timeout()
@@ -56,7 +56,8 @@ class State:
         if term_ok and log_ok:
             self.reset_timeout()
             self.server.term = request.term
-            self.server.current_role = FOLLOWER
+            # self.server.current_role = FOLLOWER
+            self.server.become(Follower)
             self.server.voted_for = request.candidateId
             return pb2.ResponseVoteRPC(term=self.server.term, voteGranted=True)
         else:
@@ -228,13 +229,12 @@ class Candidate(State):
                                          lastLogIndex=self.server.last_log_index,
                                          lastLogTerm=self.server.last_log_term)
 
-            barrier = threading.Barrier(self.server.majority - 1, timeout=5)
+            barrier = threading.Barrier(self.server.majority - 1, timeout=1)
 
             for stub in self.server.stub_list:
                 threading.Thread(target=self.ask_vote,
                                  args=(barrier, request, stub)).start()
 
-            barrier.wait()
             logging.info(str(barrier.broken) + "\n")
             barrier.reset()
             logging.info("n_waiting after reset = " + str(barrier.n_waiting))
