@@ -65,6 +65,13 @@ class State:
 
     def list_messages(self, request):
         logging.info(f"Node {self.server.id} commit index is {self.server.commit_index}")
+        print(f""" ************ Node {self.server.id} current state is  ***********
+                                commit index = {self.server.commit_index}
+                                last log index = {self.server.last_log_index}
+                                term = {self.server.term}
+                                last log term = {self.server.last_log_term}
+                                current leader = {self.server.current_leader}
+                    *************************************************""")
         response = pb2.ListMessagesResponse(logs=list(self.server.log.values()))
         return response
 
@@ -223,7 +230,7 @@ class Candidate(State):
         if time.time() > self.server.timeout:
             self.server.term += 1
             self.server.votes_received = 1
-            logging.info(f"mjority is equal to {self.server.majority}")
+            logging.info(f"majority is equal to {self.server.majority}")
             logging.info(f"node {self.server.id} is becoming candidate, start sending vote requests")
             request = pb2.RequestVoteRPC(term=self.server.term, candidateId=self.server.id,
                                          lastLogIndex=self.server.last_log_index,
@@ -235,6 +242,7 @@ class Candidate(State):
                 threading.Thread(target=self.ask_vote,
                                  args=(barrier, request, stub)).start()
 
+            barrier.wait()
             logging.info(str(barrier.broken) + "\n")
             barrier.reset()
             logging.info("n_waiting after reset = " + str(barrier.n_waiting))
