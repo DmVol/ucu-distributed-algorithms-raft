@@ -1,11 +1,14 @@
+from concurrent import futures
+from states import Candidate, Follower, Leader
+from os.path import isfile
 import random
 import grpc
 import logging
-from concurrent import futures
 import time
 import proto.raft_pb2_grpc as pb2_grpc
+import proto.raft_pb2 as pb2
 import sys
-from states import Candidate, Follower, Leader
+import signal
 
 FOLLOWER = "follower"
 CANDIDATE = "candidate"
@@ -40,6 +43,19 @@ class Server(pb2_grpc.RaftServicer):
             tmp = i, self.my_dict_address[i]
             self.port_addr.append(tmp)
 
+        # Load data from log file if exists
+        if (isfile('log.txt')):
+            with open('log.txt', 'r') as fp:
+                line = fp.readline()
+                while (line):
+                    temp_list = line.strip('\n').split(' ')
+                    entry = pb2.LogEntry(term=int(temp_list[0]), command=str(temp_list[1]))
+                    self.log[self.last_log_index + 1] = entry
+                    self.last_log_index = len(self.log)
+                    self.last_log_term = entry.term
+                    line = fp.readline()
+
+        # Prepare gRPC calls for nodes in cluster
         for self.address in self.my_dict_address.values():
             # print('{}:{}'.format(self.address.split(":")[0], self.address.split(":")[1]))
             channel = grpc.insecure_channel(self.address)
@@ -71,14 +87,33 @@ class Server(pb2_grpc.RaftServicer):
         response = self.role.append(request)
         return response
 
+    def get_log(self):
+        return self.log
 
-def serve():
+raft_server = None
+
+# Write logs to file in a case of node termination
+
+def terminate(signal,frame):
+    print("Writing...")
+    with open('log.txt', 'w') as f:
+        log = raft_server.get_log()
+        for entry in log.values():
+            f.write(str(entry.term) + ' ' + str(entry.command) + '\n')
+
+    server.stop(0)
+
+if __name__ == '__main__':
+    signal.signal(signal.SIGTERM, terminate)
+
+    logging.basicConfig()
+    logging.getLogger().setLevel(logging.INFO)
+
     my_dict_address = {}
     with open('servers.txt', 'r') as f:
         line = f.readline()
         while line:
             temp_list = line.split()
-            # print(temp_list)
             my_dict_address[temp_list[0]] = temp_list[1]
             line = f.readline()
 
@@ -94,8 +129,3 @@ def serve():
             raft_server.refresh()
     except KeyboardInterrupt:
         server.stop(0)
-
-if __name__ == '__main__':
-    logging.basicConfig()
-    logging.getLogger().setLevel(logging.INFO)
-    serve()
