@@ -77,6 +77,12 @@ class Server(pb2_grpc.RaftServicer):
         return response
 
     def ListMessages(self, request, context):
+        for self.address in self.my_dict_address.values():
+            # print('{}:{}'.format(self.address.split(":")[0], self.address.split(":")[1]))
+            channel = grpc.insecure_channel(self.address)
+            stub = pb2_grpc.RaftStub(channel)
+            self.stub_list.pop(0)
+            self.stub_list.append(stub)
         logging.info(f"Node {self.id} received list messages request")
         response = self.role.list_messages(request)
         return response
@@ -94,13 +100,14 @@ raft_server = None
 # Write logs to file in a case of node termination
 
 def terminate(signal,frame):
+    raft_server.timeout = time.time() + 1000
+    server.stop(0)
     print("Writing...")
     with open('log.txt', 'w') as f:
         log = raft_server.get_log()
         for entry in log.values():
             f.write(str(entry.term) + ' ' + str(entry.command) + '\n')
 
-    server.stop(0)
 
 if __name__ == '__main__':
     signal.signal(signal.SIGTERM, terminate)

@@ -14,7 +14,7 @@ class State:
     server: "Server"
 
     def reset_timeout(self):
-        self.server.timeout = time.time() + random.randint(10, 20)
+        self.server.timeout = time.time() + random.randint(120, 160)
 
     def vote(self, request, context):
         term_ok, log_ok = False, False
@@ -90,7 +90,7 @@ class Leader(State):
                 request = pb2.RequestAppendEntriesRPC(term=self.server.term, leaderId=self.server.id,
                                                       prevLogIndex=prevLogIndex, prevLogTerm=entry.term,
                                                       entry=entry, leaderCommit=self.server.commit_index)
-                response = stub.AppendMessage(request)
+                response = stub.AppendMessage(request, timeout=1)
 
             while prevLogIndex < self.server.last_log_index:
                 prevLogIndex += 1
@@ -100,7 +100,7 @@ class Leader(State):
                 request = pb2.RequestAppendEntriesRPC(term=self.server.term, leaderId=self.server.id,
                                                       prevLogIndex=prevLogIndex, prevLogTerm=entry.term,
                                                       entry=entry, leaderCommit=self.server.commit_index)
-                response = stub.AppendMessage(request)
+                response = stub.AppendMessage(request, timeout=1)
 
             return response
 
@@ -134,9 +134,9 @@ class Leader(State):
                 t.start()
 
             for x in threads:
-                x.join(timeout=2)
+                x.join()
 
-            self.server.timeout = time.time() + 1
+            self.server.timeout = time.time() + 2
 
     def append(self, request):
         if request.term > self.server.term:
@@ -169,7 +169,7 @@ class Leader(State):
             thread_list.append(t)
 
         for t in thread_list:
-            t.join(timeout=1)
+            t.join()
 
         while not que.empty():
             result = que.get()
@@ -202,11 +202,11 @@ class Candidate(State):
 
     def ask_vote(self, barrier, request, stub):
         try:
-            response = stub.Vote(request)
+            response = stub.Vote(request, timeout=1)
             if response.voteGranted:
                 self.server.votes_received += 1
                 logging.info(f"node {self.server.id} received {self.server.votes_received} votes")
-                barrier.wait(timeout=0.5)
+                barrier.wait()
 
         except:
             logging.info("connection error")
@@ -279,8 +279,7 @@ class Follower(State):
             return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=False)
 
         # Remove uncommitted entries
-        if self.server.commit_index > 0 and self.server.last_log_term < request.prevLogTerm and self.server.last_log_index > self.server.commit_index:
-            # del self.server.log[request.lastLogIndex:]
+        if self.server.last_log_term < request.prevLogTerm and self.server.last_log_index > self.server.commit_index:
             logging.info(f"follower node {self.server.id} removing entity {request.prevLogIndex}")
             self.server.log.pop(request.prevLogIndex, None)
             self.server.last_log_index = self.server.commit_index
@@ -289,7 +288,7 @@ class Follower(State):
         if request.leaderCommit > self.server.commit_index:
             logging.info(f"follower node {self.server.id} commit sync")
             for i in range(self.server.commit_index, request.leaderCommit + 1):
-                if i in self.server.log:
+                if i in self.server.log and request.prevLogTerm == self.server.last_log_term:
                     self.server.commit_index = i
 
         logging.info(f"follower index {self.server.last_log_index} and request index is {request.prevLogIndex}")
