@@ -16,23 +16,6 @@ class State:
     def reset_timeout(self):
         self.server.timeout = time.time() + random.randint(10, 20)
 
-    def init_timeout(self):
-        self.reset_timeout()
-        # safety guarantee, timeout thread may expire after election
-        if self.server.timeout_thread and self.server.timeout_thread.isAlive():
-            return
-        self.server.timeout_thread = threading.Thread(target=self.timeout_loop)
-        self.server.timeout_thread.start()
-
-    def timeout_loop(self):
-        # only stop timeout thread when winning the election
-        while self.server.current_role != LEADER:
-            delta = self.server.timeout - time.time()
-            if delta < 0:
-                self.server.current_role = CANDIDATE
-            else:
-                time.sleep(delta)
-
     def vote(self, request, context):
         term_ok, log_ok = False, False
 
@@ -56,7 +39,6 @@ class State:
         if term_ok and log_ok:
             self.reset_timeout()
             self.server.term = request.term
-            # self.server.current_role = FOLLOWER
             self.server.become(Follower)
             self.server.voted_for = request.candidateId
             return pb2.ResponseVoteRPC(term=self.server.term, voteGranted=True)
@@ -88,14 +70,16 @@ class Leader(State):
             entry = self.server.log[prevLogIndex]
         else:
             entry = None
+
         try:
-            response = stub.AppendMessage(request)
+
+            response = stub.AppendMessage(request, timeout=1)
 
             if response.success == False and response.term > self.server.term:
                 logging.info(f"killing thread on node {self.server.id}")
                 self.reset_timeout()
 
-            time.sleep(random.uniform(0, 1))
+            time.sleep(random.uniform(0, 0.5))
 
             while response.success == False:
                 if prevLogIndex >= 1:
@@ -121,6 +105,7 @@ class Leader(State):
             return response
 
         except:
+
             logging.info('cannot connect to ' + str(self.server.port_addr[node_id]))
 
     def run(self):
@@ -128,16 +113,17 @@ class Leader(State):
         if time.time() > self.server.timeout:
             logging.info(f"Node {self.server.id} start sending requests")
             prevLogIndex = self.server.last_log_index
+
             if prevLogIndex in self.server.log:
                 entry = self.server.log[prevLogIndex]
             else:
                 entry = None
+
             # Append Entries Request.
             logging.info(f"my term is {self.server.term} last log term is {self.server.last_log_term}")
             request = pb2.RequestAppendEntriesRPC(term=self.server.term, leaderId=self.server.id,
-                                                  prevLogIndex=prevLogIndex,
-                                                  prevLogTerm=self.server.last_log_term, entry=entry,
-                                                  leaderCommit=self.server.commit_index)
+                                                  prevLogIndex=prevLogIndex, prevLogTerm=self.server.last_log_term,
+                                                  entry=entry, leaderCommit=self.server.commit_index)
 
             threads = []
 
@@ -201,7 +187,6 @@ class Leader(State):
         logging.info(f"term in request is greater than mine node {self.server.id} is becoming follower")
         self.server.term = request.term
         self.server.voted_for = -1
-        # self.server.current_role = FOLLOWER
         self.server.current_leader = request.leaderId
         self.reset_timeout()
         self.server.become(Follower)
@@ -221,7 +206,7 @@ class Candidate(State):
             if response.voteGranted:
                 self.server.votes_received += 1
                 logging.info(f"node {self.server.id} received {self.server.votes_received} votes")
-                barrier.wait()
+                barrier.wait(timeout=0.5)
 
         except:
             logging.info("connection error")
@@ -242,7 +227,7 @@ class Candidate(State):
                 threading.Thread(target=self.ask_vote,
                                  args=(barrier, request, stub)).start()
 
-            barrier.wait()
+            # barrier.wait()
             logging.info(str(barrier.broken) + "\n")
             barrier.reset()
             logging.info("n_waiting after reset = " + str(barrier.n_waiting))
@@ -252,7 +237,6 @@ class Candidate(State):
             self.reset_timeout()
         elif self.server.votes_received >= self.server.majority:
             logging.info(f"node {self.server.id} received majority votes, becoming leader")
-            # self.server.current_role = LEADER
             self.server.votes_received = 1
             self.server.voted_for = self.server.id
             self.server.timeout = time.time()
@@ -262,7 +246,6 @@ class Candidate(State):
         logging.info(f"term in request is greater than mine node {self.server.id} is becoming follower")
         self.server.term = request.term
         self.server.voted_for = -1
-        # self.server.current_role = FOLLOWER
         self.server.current_leader = request.leaderId
         self.reset_timeout()
         self.server.become(Follower)
@@ -290,6 +273,7 @@ class Follower(State):
         self.server.term = request.term
         self.server.current_leader = request.leaderId
         self.reset_timeout()
+
         if request.term < self.server.term:
             logging.info(f"follower term :{self.server.term} is greater that in request {request.term}")
             return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=False)
@@ -314,7 +298,6 @@ class Follower(State):
 
         if (request.prevLogIndex == self.server.last_log_index + 1) and request.prevLogTerm >= self.server.last_log_term:
             logging.info(f"received data for log index {self.server.last_log_index}")
-
             self.server.log[request.prevLogIndex] = request.entry
             self.server.last_log_index += 1
             self.server.last_log_term = request.prevLogTerm

@@ -35,7 +35,6 @@ class Server(pb2_grpc.RaftServicer):
         self.last_log_index = 0
         self.last_log_term = 0
         self.timeout = time.time() + random.randint(5, 10)
-        self.timeout_thread = None
         self.majority = (len(self.my_dict_address) + 1) // 2 + 1
 
         # Form nodes address list
