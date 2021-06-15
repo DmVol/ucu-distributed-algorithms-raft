@@ -1,6 +1,7 @@
 from concurrent import futures
 from states import Candidate, Follower, Leader
 from os.path import isfile
+from collections import OrderedDict
 import random
 import grpc
 import logging
@@ -21,14 +22,12 @@ class Server(pb2_grpc.RaftServicer):
     def __init__(self, my_dict_address):
         self.term = 0
         self.voted_for = None
-        self.log = {}
+        self.log = OrderedDict()
         self.commit_index = 0
         self.role = Follower(self)
         self.current_role = FOLLOWER
         self.current_leader = 0
         self.votes_received = 0
-        self.stub_list = []
-        self.port_addr = []
         self.id = int(sys.argv[2])
         self.my_dict_address = my_dict_address
         self.my_dict_address.pop(str(self.id))
@@ -36,11 +35,6 @@ class Server(pb2_grpc.RaftServicer):
         self.last_log_term = 0
         self.timeout = time.time() + random.randint(5, 10)
         self.majority = (len(self.my_dict_address) + 1) // 2 + 1
-
-        # Form nodes address list
-        for i in self.my_dict_address:
-            tmp = i, self.my_dict_address[i]
-            self.port_addr.append(tmp)
 
         # Load data from log file if exists
         if (isfile('log.txt')):
@@ -53,13 +47,6 @@ class Server(pb2_grpc.RaftServicer):
                     self.last_log_index = len(self.log)
                     self.last_log_term = entry.term
                     line = fp.readline()
-
-        # Prepare gRPC calls for nodes in cluster
-        for self.address in self.my_dict_address.values():
-            # print('{}:{}'.format(self.address.split(":")[0], self.address.split(":")[1]))
-            channel = grpc.insecure_channel(self.address)
-            stub = pb2_grpc.RaftStub(channel)
-            self.stub_list.append(stub)
 
         logging.info(f"Node {self.id} initialized")
 
@@ -77,12 +64,6 @@ class Server(pb2_grpc.RaftServicer):
         return response
 
     def ListMessages(self, request, context):
-        for self.address in self.my_dict_address.values():
-            # print('{}:{}'.format(self.address.split(":")[0], self.address.split(":")[1]))
-            channel = grpc.insecure_channel(self.address)
-            stub = pb2_grpc.RaftStub(channel)
-            self.stub_list.pop(0)
-            self.stub_list.append(stub)
         logging.info(f"Node {self.id} received list messages request")
         response = self.role.list_messages(request)
         return response

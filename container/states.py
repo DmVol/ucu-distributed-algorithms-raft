@@ -1,9 +1,11 @@
-import random
 from queue import Queue
+import random
 import time
 import proto.raft_pb2 as pb2
+import proto.raft_pb2_grpc as pb2_grpc
 import threading
 import logging
+import grpc
 
 FOLLOWER = "follower"
 CANDIDATE = "candidate"
@@ -14,7 +16,7 @@ class State:
     server: "Server"
 
     def reset_timeout(self):
-        self.server.timeout = time.time() + random.randint(120, 160)
+        self.server.timeout = time.time() + random.randint(10, 20)
 
     def vote(self, request, context):
         term_ok, log_ok = False, False
@@ -66,11 +68,6 @@ class Leader(State):
         self.server.current_role = LEADER
 
     def broadcast(self, node_id, prevLogIndex, request, stub):
-        if prevLogIndex in self.server.log:
-            entry = self.server.log[prevLogIndex]
-        else:
-            entry = None
-
         try:
 
             response = stub.AppendMessage(request, timeout=1)
@@ -127,7 +124,10 @@ class Leader(State):
 
             threads = []
 
-            for node_id, stub in enumerate(self.server.stub_list):
+            for node_id, address in enumerate(self.server.my_dict_address.values()):
+                channel = grpc.insecure_channel(address)
+                stub = pb2_grpc.RaftStub(channel)
+
                 t = threading.Thread(target=self.broadcast,
                                      args=(node_id, prevLogIndex, request, stub))
                 threads.append(t)
@@ -206,7 +206,7 @@ class Candidate(State):
             if response.voteGranted:
                 self.server.votes_received += 1
                 logging.info(f"node {self.server.id} received {self.server.votes_received} votes")
-                barrier.wait()
+                barrier.wait(timeout=1)
 
         except:
             logging.info("connection error")
@@ -221,9 +221,12 @@ class Candidate(State):
                                          lastLogIndex=self.server.last_log_index,
                                          lastLogTerm=self.server.last_log_term)
 
-            barrier = threading.Barrier(self.server.majority - 1, timeout=1)
+            barrier = threading.Barrier(self.server.majority - 1)
 
-            for stub in self.server.stub_list:
+            for address in self.server.my_dict_address.values():
+                channel = grpc.insecure_channel(address)
+                stub = pb2_grpc.RaftStub(channel)
+
                 threading.Thread(target=self.ask_vote,
                                  args=(barrier, request, stub)).start()
 
@@ -252,9 +255,16 @@ class Candidate(State):
         return pb2.ResponseAppendEntriesRPC(term=self.server.term, success=False)
 
     def append(self, request):
+        response = None
+
         if request.term > self.server.term:
             response = self.become_follower(request)
-            return response
+        elif request.prevLogTerm > self.server.last_log_term:
+            response = self.become_follower(request)
+        elif request.lastLogTerm == self.server.last_log_term and request.lastLogIndex >= self.server.last_log_index:
+            response = self.become_follower(request)
+
+        return response
 
 
 class Follower(State):
