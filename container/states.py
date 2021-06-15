@@ -67,7 +67,7 @@ class Leader(State):
         self.server = server
         self.server.current_role = LEADER
 
-    def broadcast(self, node_id, prevLogIndex, request, stub):
+    def broadcast(self, address, prevLogIndex, request, stub):
         try:
 
             response = stub.AppendMessage(request, timeout=1)
@@ -103,7 +103,7 @@ class Leader(State):
 
         except:
 
-            logging.info('cannot connect to ' + str(self.server.port_addr[node_id]))
+            logging.info(f"cannot connect to {address}")
 
     def run(self):
         logging.info(f"{self.server.id} is leader")
@@ -124,12 +124,12 @@ class Leader(State):
 
             threads = []
 
-            for node_id, address in enumerate(self.server.my_dict_address.values()):
+            for address in self.server.my_dict_address.values():
                 channel = grpc.insecure_channel(address)
                 stub = pb2_grpc.RaftStub(channel)
 
                 t = threading.Thread(target=self.broadcast,
-                                     args=(node_id, prevLogIndex, request, stub))
+                                     args=(address, prevLogIndex, request, stub))
                 threads.append(t)
                 t.start()
 
@@ -162,9 +162,12 @@ class Leader(State):
         thread_list = []
         responses = []
 
-        for node_id, stub in enumerate(self.server.stub_list):
+        for address in self.server.my_dict_address.values():
+            channel = grpc.insecure_channel(address)
+            stub = pb2_grpc.RaftStub(channel)
+
             t = threading.Thread(target=lambda q, arg1, arg2, arg3, arg4: q.put(self.broadcast(arg1, arg2, arg3, arg4)),
-                                 args=(que, node_id, self.server.last_log_index, req, stub))
+                                 args=(que, address, self.server.last_log_index, req, stub))
             t.start()
             thread_list.append(t)
 
@@ -261,7 +264,7 @@ class Candidate(State):
             response = self.become_follower(request)
         elif request.prevLogTerm > self.server.last_log_term:
             response = self.become_follower(request)
-        elif request.lastLogTerm == self.server.last_log_term and request.lastLogIndex >= self.server.last_log_index:
+        elif request.prevLogTerm == self.server.last_log_term and request.prevLogIndex >= self.server.last_log_index:
             response = self.become_follower(request)
 
         return response
