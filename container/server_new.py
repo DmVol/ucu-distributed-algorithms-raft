@@ -46,6 +46,7 @@ class Server(pb2_grpc.RaftServicer):
                     self.log[self.last_log_index + 1] = entry
                     self.last_log_index = len(self.log)
                     self.last_log_term = entry.term
+                    self.term = entry.term
                     line = fp.readline()
 
         logging.info(f"Node {self.id} initialized")
