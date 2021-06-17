@@ -73,8 +73,8 @@ class Leader(State):
             response = stub.AppendMessage(request, timeout=1)
 
             if response.success == False and response.term > self.server.term:
-                logging.info(f"killing thread on node {self.server.id}")
-                self.reset_timeout()
+                logging.info(f"node {self.server.id} is becoming follower")
+                self.become_follower(request)
 
             time.sleep(random.uniform(0, 0.5))
 
